@@ -90,7 +90,7 @@ class AppInterface:
             label=(loc.get_string("cur-version-latest") + " " + label),
             parent="main_view_bar",
             callback=lambda: webbrowser.open(
-                "https://github.com/themanyfaceddemon/Barotrauma_Modding_Tool/releases/latest"
+                "https://github.com/zangys/Barotrauma_Modding_Tool_Enchanted/releases/latest"
             ),
             enabled=(is_latest is False),
         )

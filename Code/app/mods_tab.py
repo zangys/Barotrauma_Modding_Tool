@@ -15,24 +15,55 @@ class ModsTab:
 
     @staticmethod
     def on_sync_mods_clicked():
-        """
-        Простая синхронная версия. Выполняет всю работу последовательно.
-        """
-        logging.info("Начинаем синхронизацию модов...")
+        import threading
         
-        changes_were_made = ModManager.sync_workshop_mods()
-        
-        if changes_were_made:
-            logging.info("Изменения найдены, перезагружаем список модов.")
-            ModManager.load_mods()
-            ModsTab.render_mods()
-        else:
-            logging.info("Изменений не найдено, UI не обновлялся.")
+        def run_sync():
+            try:
+                dpg.configure_item("sync_workshop_button", enabled=False)
+                dpg.set_value("sync_status_text", loc.get_string("status-sync-running") if loc.has_string("status-sync-running") else "Syncing...")
+                
+                logging.info("Начинаем синхронизацию модов (фоновый поток)...")
+                changes_were_made = ModManager.sync_workshop_mods()
+                
+                if changes_were_made:
+                    logging.info("Изменения найдены, перезагружаем список модов.")
+                    ModManager.load_mods()
+                    ModsTab.render_mods()
+                    dpg.set_value("sync_status_text", loc.get_string("status-sync-done") if loc.has_string("status-sync-done") else "Sync complete")
+                else:
+                    logging.info("Изменений не найдено.")
+                    dpg.set_value("sync_status_text", loc.get_string("status-sync-no-new") if loc.has_string("status-sync-no-new") else "No changes")
+            
+            except Exception as e:
+                logging.error(f"Ошибка при синхронизации: {e}")
+                dpg.set_value("sync_status_text", f"Error: {e}")
+            
+            finally:
+                dpg.configure_item("sync_workshop_button", enabled=True)
+
+        threading.Thread(target=run_sync, daemon=True).start()
 
     @staticmethod
     def on_activate_all_clicked():
         ModManager.activate_all_mods()
         ModsTab.render_mods()
+
+    @staticmethod
+    def on_process_errors_clicked():
+        import threading
+        def run_process():
+            dpg.set_value("error_count_text", "...")
+            dpg.set_value("warning_count_text", "...")
+            ModManager.process_errors()
+            error_count, warning_count = ModsTab.count_mods_with_issues()
+            dpg.set_value(
+                "error_count_text", loc.get_string("error-count", count=error_count)
+            )
+            dpg.set_value(
+                "warning_count_text", loc.get_string("warning-count", count=warning_count)
+            )
+            ModsTab.render_mods()
+        threading.Thread(target=run_process, daemon=True).start()
 
     @staticmethod
     def create():
@@ -61,7 +92,7 @@ class ModsTab:
                     callback=ModsTab.on_sync_mods_clicked,
                     tag="sync_workshop_button"
                 )
-            with dpg.tooltip("sync_workshop_button"): # Используем правильный tag
+            with dpg.tooltip("sync_workshop_button"):
                 dpg.add_text(loc.get_string("tooltip-sync-workshop"))
 
             dpg.add_text("", tag="sync_status_text")
@@ -156,7 +187,7 @@ class ModsTab:
 
     @staticmethod
     def render_mods():
-        ModManager.process_errors()
+        # ModManager.process_errors()
         dpg.delete_item("active_mods_child", children_only=True)
         for mod in ModManager.active_mods:
             if ModsTab.active_mod_search_text in mod.name.lower():

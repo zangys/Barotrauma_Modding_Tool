@@ -346,42 +346,58 @@ class ModManager:
         local_mods_path.mkdir(exist_ok=True)
 
         changes_made = False
-
-      
+        
         try:
-
             workshop_mod_ids = {folder.name for folder in workshop_path.iterdir() if folder.is_dir() and folder.name.isdigit()}
         except Exception as e:
             logger.error(f"Не удалось прочитать папку Мастерской: {e}")
             return False
 
+        mods_to_delete = []
         for local_mod_folder in local_mods_path.iterdir():
-
             if local_mod_folder.is_dir() and local_mod_folder.name.isdigit():
                 if local_mod_folder.name not in workshop_mod_ids:
-                    logger.info(f"Удаление мода, от которого отписались: {local_mod_folder.name}")
-                    try:
-                        shutil.rmtree(local_mod_folder)
-                        changes_made = True
-                    except Exception as e:
-                        logger.error(f"Не удалось удалить папку мода {local_mod_folder.name}: {e}")
+                    mods_to_delete.append(local_mod_folder)
+
+        if mods_to_delete:
+            def delete_mod(path):
+                logger.info(f"Удаление мода, от которого отписались: {path.name}")
+                try:
+                    shutil.rmtree(path)
+                    return True
+                except Exception as e:
+                    logger.error(f"Не удалось удалить папку мода {path.name}: {e}")
+                    return False
+
+            with ThreadPoolExecutor() as executor:
+                results = list(executor.map(delete_mod, mods_to_delete))
+                if any(results):
+                    changes_made = True
 
         current_local_mod_ids = {folder.name for folder in local_mods_path.iterdir() if folder.is_dir()}
-        
+
+        mods_to_copy = []
         for mod_id in workshop_mod_ids:
             if mod_id not in current_local_mod_ids:
                 source_path = workshop_path / mod_id
-                if not (source_path / "filelist.xml").exists():
-                    continue
+                if (source_path / "filelist.xml").exists():
+                    mods_to_copy.append((source_path, local_mods_path / mod_id))
 
-                destination_path = local_mods_path / mod_id
-                logger.info(f"Найден новый мод: {mod_id}. Копирование...")
-                
+        if mods_to_copy:
+            def copy_mod(paths):
+                src, dst = paths
+                logger.info(f"Найден новый мод: {src.name}. Копирование...")
                 try:
-                    shutil.copytree(source_path, destination_path)
-                    changes_made = True
+                    shutil.copytree(src, dst)
+                    return True
                 except Exception as e:
-                    logger.error(f"Не удалось скопировать мод {mod_id}: {e}")
+                    logger.error(f"Не удалось скопировать мод {src.name}: {e}")
+                    return False
+
+            with ThreadPoolExecutor() as executor:
+                results = list(executor.map(copy_mod, mods_to_copy))
+                if any(results):
+                    changes_made = True
 
         if not changes_made:
             logger.info("Синхронизация завершена. Изменений не найдено.")
