@@ -1,4 +1,5 @@
-name: Build Executables
+
+name: Manual Build
 
 on: workflow_dispatch
 
@@ -9,23 +10,12 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            arch: x64
-            build-name: linux-64bit
-          - os: ubuntu-latest
-            arch: x86
-            build-name: linux-32bit
-          - os: ubuntu-latest
-            arch: arm64
-            build-name: linux-arm64
+            asset_name: BMT-linux-64bit.zip
+            separator: ":"
+
           - os: windows-latest
-            arch: x64
-            build-name: windows-64bit
-          - os: windows-latest
-            arch: x86
-            build-name: windows-32bit
-          - os: windows-latest
-            arch: arm64
-            build-name: windows-arm64
+            asset_name: BMT-windows-64bit.zip
+            separator: ";"
 
     steps:
       - name: Checkout code
@@ -36,52 +26,27 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller and dependencies
+      - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install pyinstaller
           pip install -r requirements.txt
   
       - name: Build with PyInstaller
         run: |
-          pyinstaller main.py --add-data=Data:Data
-        working-directory: ./
-
-      - name: Create ZIP archive (Linux)
-        if: startsWith(matrix.os, 'ubuntu')
-        run: |
-          zip -r ${{ matrix.build-name }}.zip dist/main/*
+          pyinstaller main.py --noconsole --onefile --name BMT --add-data "Data${{ matrix.separator }}Data"
 
       - name: Create ZIP archive (Windows)
-        if: startsWith(matrix.os, 'windows')
-        run: |
-          powershell -Command "Compress-Archive -Path dist/main/* -DestinationPath ${{ matrix.build-name }}.zip"
+        if: matrix.os == 'windows-latest'
+        run: Compress-Archive -Path dist/BMT.exe -DestinationPath ${{ matrix.asset_name }}
+        
+      - name: Create ZIP archive (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: zip -r ${{ matrix.asset_name }} ./dist/BMT
 
-      - name: Upload ZIP artifact
+      - name: Upload Build Artifact
+  
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.build-name }}
-          path: ${{ matrix.build-name }}.zip
-
-  combine:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all ZIP artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: allzips
-
-      - name: Flatten artifact structure
-        run: |
-          find allzips -name "*.zip" -exec mv {} ./ \;
-          rm -rf allzips
-
-      - name: Create combined ZIP archive
-        run: |
-          zip -r all-builds.zip *.zip
-
-      - name: Upload combined ZIP archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: all-builds
-          path: all-builds.zip
+          name: ${{ matrix.asset_name }}
+          path: ./${{ matrix.asset_name }}
