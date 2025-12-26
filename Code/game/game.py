@@ -94,6 +94,15 @@ class Game:
     @staticmethod
     def run_exec(parms: List[str] = []):
         try:
+            if platform.system() in ["Linux", "Darwin"]:
+                APP_ID = "602960" # AppID  Barotrauma
+
+                command = ["steam", "-applaunch", APP_ID] + parms
+
+                subprocess.Popen(command)
+                logger.info(f"Launching the game via Steam with parameters: {' '.join(parms)}")
+                return 
+
             exec_file = Game._EXECUTABLES.get(platform.system())
             if exec_file is None:
                 raise RuntimeError("Unknown operating system")
@@ -106,8 +115,8 @@ class Game:
             if not executable_path.exists():
                 logger.error(f"Executable not found: {executable_path}")
                 return
-
-            subprocess.run([str(executable_path)] + parms, cwd=str(game_path))
+            subprocess.Popen([str(executable_path)] + parms, cwd=str(game_path))
+            logger.info(f"Launch the game directly with parameters: {' '.join(parms)}")
 
         except Exception as e:
             logger.error(f"Error running the game: {e}")

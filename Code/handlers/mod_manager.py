@@ -212,6 +212,12 @@ class ModManager:
             return True
 
         return False
+        
+    @staticmethod
+    def activate_all_mods():
+        ModManager.active_mods.extend(ModManager.inactive_mods)
+        ModManager.inactive_mods.clear()
+        logger.info("all mods active")
 
     @staticmethod
     def swap_active_mods(mod_id1: str, mod_id2: str) -> None:

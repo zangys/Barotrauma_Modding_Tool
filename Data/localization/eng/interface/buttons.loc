@@ -4,3 +4,4 @@ btn-set-game-dir-desc = Set the path to your Barotrauma installation.
 btn-show-full-details = Show full details
 btn-sort-mods = Sort active mods
 btn-sort-mods-desc = Sorts active modifications alphabetically, taking into account dependencies
+btn-activate-all = Activate all mods

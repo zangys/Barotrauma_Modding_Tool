@@ -27,6 +27,14 @@ class ModsTab:
                 with dpg.tooltip("sort_button"):
                     dpg.add_text(loc.get_string("btn-sort-mods-desc"))
 
+                dpg.add_button(
+                label=loc.get_string("btn-activate-all"),
+                callback=ModsTab.on_activate_all_clicked,
+                tag="activate_all_button",
+            )
+            with dpg.tooltip("activate_all_button"):
+                dpg.add_text(loc.get_string("btn-activate-all-desc"))
+
             with dpg.group(horizontal=True):
                 dpg.add_text(
                     loc.get_string("label-directory-found"), color=(100, 150, 250)
@@ -103,6 +111,11 @@ class ModsTab:
                     ):
                         pass
 
+        ModsTab.render_mods()
+
+    @staticmethod
+    def on_activate_all_clicked():
+        ModManager.activate_all_mods()
         ModsTab.render_mods()
 
     @staticmethod
