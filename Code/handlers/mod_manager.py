@@ -187,6 +187,7 @@ class ModManager:
 
         config_player = game_path / "config_player.xml"
         active_mod_configs = ModManager._get_active_mod_configs(config_player)
+
         paths_to_check = [
             game_path / "LocalMods",
             Path(AppConfig.get("workshop_sync_path") or ""),
@@ -205,29 +206,56 @@ class ModManager:
                             seen_paths.add(item)
                 except OSError:
                     continue
-        cpu_count = os.cpu_count() or 4
-        max_workers = min(16, cpu_count * 2) 
-        
+
+        max_workers = min(32, (os.cpu_count() or 4) * 4)
         loaded_mods_raw = []
+        
         if mod_folders_to_process:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 results = list(executor.map(ModManager._parse_mod_safe, mod_folders_to_process))
-                
                 for mod in results:
                     if mod:
                         loaded_mods_raw.append(mod)
-        CacheManager.save()
-        unique_mods: Dict[str, ModUnit] = {}
-        for mod in loaded_mods_raw:
-            if mod.id not in unique_mods:
-                unique_mods[mod.id] = mod
-            else:
-                if mod.local and not unique_mods[mod.id].local:
-                    unique_mods[mod.id] = mod
-        
-        ModManager._mod_map = unique_mods.copy()
 
-        for mod in unique_mods.values():
+        CacheManager.save()
+
+        grouped_by_name: Dict[str, List[ModUnit]] = defaultdict(list)
+        for mod in loaded_mods_raw:
+            grouped_by_name[mod.name].append(mod)
+
+        unique_mods_list = []
+
+        for name, group in grouped_by_name.items():
+            if len(group) == 1:
+                unique_mods_list.append(group[0])
+                continue
+            
+            
+            mods_with_steam = [m for m in group if m.steam_id]
+            mods_without_steam = [m for m in group if not m.steam_id]
+            
+            selected_mod = None
+
+            if mods_with_steam and mods_without_steam:
+                selected_mod = mods_with_steam[0]
+            
+            elif len(mods_with_steam) > 1:
+                locals = [m for m in mods_with_steam if m.local]
+                if locals:
+                    selected_mod = locals[0]
+                else:
+                    selected_mod = mods_with_steam[0]
+            else:
+
+                selected_mod = group[0]
+
+            if selected_mod:
+                unique_mods_list.append(selected_mod)
+
+        for mod in unique_mods_list:
+            ModManager._mod_map[mod.id] = mod
+
+        for mod in ModManager._mod_map.values():
             if mod.id in active_mod_configs:
                 mod.load_order = active_mod_configs[mod.id]
                 ModManager.active_mods.append(mod)

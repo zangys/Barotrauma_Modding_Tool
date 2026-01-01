@@ -379,22 +379,27 @@ class ModsTab:
     @staticmethod
     def on_mod_dropped(sender, app_data, user_data):
         drag_data = app_data
-        drag_id = drag_data["mod_id"]
-        drag_status = drag_data["status"]
+        if not isinstance(drag_data, dict):
+            return
 
-        target_item_type = dpg.get_item_type(sender)
+        drag_id = drag_data.get("mod_id")
+        drag_status = drag_data.get("status")
+
         target_status = None
         target_id = None
+        is_container_drop = False
 
-        if target_item_type == "mvAppItemType::mvChildWindow":
-            target_status = user_data 
-        elif target_item_type == "mvAppItemType::mvText":
-            target_data = user_data 
-            target_status = target_data.get("status")
-            target_id = target_data.get("mod_id")
+        if isinstance(user_data, dict) and "mod_id" in user_data:
+            target_status = user_data.get("status")
+            target_id = user_data.get("mod_id")
+        
+        elif isinstance(user_data, str):
+            target_status = user_data
+            is_container_drop = True
 
-        if not target_status:
+        if not target_status or not drag_id:
             return
+
         if drag_status != target_status:
             if target_status == "active":
                 ModManager.activate_mod(drag_id)
@@ -405,12 +410,12 @@ class ModsTab:
         if drag_status == "active":
             if target_id and target_id != drag_id:
                 ModManager.swap_active_mods(drag_id, target_id)
-            elif target_item_type == "mvAppItemType::mvChildWindow":
+            elif is_container_drop:
                 ModManager.move_active_mod_to_end(drag_id)
         else:
             if target_id and target_id != drag_id:
                 ModManager.swap_inactive_mods(drag_id, target_id)
-            elif target_item_type == "mvAppItemType::mvChildWindow":
+            elif is_container_drop:
                 ModManager.move_inactive_mod_to_end(drag_id)
 
         ModsTab.render_mods()
@@ -437,7 +442,6 @@ class ModsTab:
 
     @staticmethod
     def on_preset_selected(sender, app_data):
-        # Очищаем сообщение об ошибке при выборе
         dpg.set_value(ModsTab.TAG_PRESET_MSG, "")
 
     @staticmethod
@@ -453,11 +457,9 @@ class ModsTab:
             ModsTab.render_mods()
             if missing:
                 dpg.set_value(ModsTab.TAG_PRESET_MSG, f"Loaded with missing mods: {len(missing)}")
-                # Можно вывести в консоль/лог подробности
                 logger.warning(f"Missing mods in preset '{preset_name}': {missing}")
             else:
                 dpg.set_value(ModsTab.TAG_PRESET_MSG, "Preset loaded successfully.")
-                # Сбрасываем цвет на зеленый (если есть возможность, иначе просто текст)
         else:
             dpg.set_value(ModsTab.TAG_PRESET_MSG, "Failed to load preset!")
 
@@ -468,7 +470,6 @@ class ModsTab:
             dpg.set_value(ModsTab.TAG_PRESET_MSG, "Enter a name first!")
             return
         
-        # Простая валидация имени файла
         invalid_chars = '<>:"/\\|?*'
         if any(char in invalid_chars for char in name):
             dpg.set_value(ModsTab.TAG_PRESET_MSG, "Invalid characters in name!")
@@ -476,24 +477,20 @@ class ModsTab:
 
         if ModManager.save_preset(name):
             dpg.set_value(ModsTab.TAG_PRESET_MSG, f"Saved '{name}'!")
-            # Обновляем список комбобокса
             presets = ModManager.get_available_presets()
             dpg.configure_item(ModsTab.TAG_PRESET_COMBO, items=presets)
             dpg.set_value(ModsTab.TAG_PRESET_COMBO, name)
-            dpg.set_value(ModsTab.TAG_PRESET_INPUT, "") # Очистить поле ввода
+            dpg.set_value(ModsTab.TAG_PRESET_INPUT, "")
         else:
             dpg.set_value(ModsTab.TAG_PRESET_MSG, "Error saving preset.")
 
-    # Также нужно обновить список пресетов при перезагрузке модов
     @staticmethod
     def _finalize_reload(success: bool):
-        # ... старый код ...
         ModsTab.render_mods()
         status_text = "Готово!" if success else "Ошибка!"
         dpg.set_value(ModsTab.TAG_RELOAD_STATUS, status_text)
         dpg.configure_item(ModsTab.TAG_BTN_RELOAD, enabled=True)
         
-        # ОБНОВЛЕНИЕ СПИСКА ПРЕСЕТОВ
         if success:
             presets = ModManager.get_available_presets()
             dpg.configure_item(ModsTab.TAG_PRESET_COMBO, items=presets)
