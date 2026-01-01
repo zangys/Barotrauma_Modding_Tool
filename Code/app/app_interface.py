@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import webbrowser
 
 import dearpygui.dearpygui as dpg
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class AppInterface:
+    TAG_VERSION_ITEM = "menu_item_version_check"
+
     @staticmethod
     def initialize():
         AppInterface._create_viewport_menu_bar()
@@ -25,18 +28,23 @@ class AppInterface:
         SettingsTab.create()
         ModsTab.create()
 
-        dpg.set_value("main_tab_bar", "mod_tab")
+        # Устанавливаем активную вкладку
+        if dpg.does_item_exist("mod_tab"):
+            dpg.set_value("main_tab_bar", "mod_tab")
 
         dpg.set_viewport_resize_callback(AppInterface._res_callback)
         dpg_tools.rc_windows()
 
+        # Асинхронная проверка версии
+        threading.Thread(target=AppInterface._async_check_version, daemon=True).start()
+
     @staticmethod
     def _res_callback() -> None:
         dpg_tools.rc_windows()
-
+        # ИСПРАВЛЕНИЕ 1: Сохраняем в конфиг Python, а не в DPG виджет
         AppConfig.set(
-            "last_viewport_size",
-            f"{dpg.get_viewport_width()} {dpg.get_viewport_height()}",
+            "last_viewport_size", 
+            f"{dpg.get_viewport_width()} {dpg.get_viewport_height()}"
         )
 
     @staticmethod
@@ -51,55 +59,71 @@ class AppInterface:
 
     @staticmethod
     def _create_viewport_menu_bar():
-        dpg.add_viewport_menu_bar(tag="main_view_bar")
-
-        dpg.add_menu_item(
-            label=loc.get_string("menu-bar-start-game"),
-            parent="main_view_bar",
-            callback=AppInterface.start_game,
-        )
-
-        dpg.add_menu_item(
-            label=loc.get_string("cac-window-name"),
-            parent="main_view_bar",
-            callback=AppInterface.create_cac_window,
-        )
-
-        is_latest = None
-        try:
-            response = requests.get(
-                "https://api.github.com/repos/themanyfaceddemon/Barotrauma_Modding_Tool/releases/latest"
-            )
-            if response.status_code == 200:
-                latest_release = response.json()
-                is_latest = AppConfig.version == latest_release["tag_name"]
-
-        except Exception:
-            pass
-
-        if is_latest is True:
-            label = loc.get_string("base-yes")
-
-        elif is_latest is False:
-            label = loc.get_string("base-no")
-
-        else:
-            label = loc.get_string("base-unknown")
-
-        dpg.add_menu_item(
-            label=(loc.get_string("cur-version-latest") + " " + label),
-            parent="main_view_bar",
-            callback=lambda: webbrowser.open(
-                "https://github.com/zangys/Barotrauma_Modding_Tool_Enchanted/releases/latest"
-            ),
-            enabled=(is_latest is False),
-        )
-
-        if AppConfig.get("debug", False):
+        with dpg.viewport_menu_bar(tag="main_view_bar"):
             dpg.add_menu_item(
-                label="Console",
-                parent="main_view_bar",
-                callback=AppInterface._setup_console,
+                label=loc.get_string("menu-bar-start-game"),
+                callback=AppInterface.start_game,
+            )
+
+            dpg.add_menu_item(
+                label=loc.get_string("cac-window-name"),
+                callback=AppInterface.create_cac_window,
+            )
+
+            dpg.add_menu_item(
+                label=f"{loc.get_string('cur-version-latest')} ...",
+                tag=AppInterface.TAG_VERSION_ITEM,
+                callback=lambda: webbrowser.open(
+                    "https://github.com/zangys/Barotrauma_Modding_Tool_Enchanted/releases/latest"
+                ),
+                enabled=False, 
+            )
+
+            if AppConfig.get("debug", False):
+                dpg.add_menu_item(
+                    label="Console",
+                    callback=AppInterface._setup_console,
+                )
+
+    @staticmethod
+    def _async_check_version():
+        is_latest = None
+        repo_api_url = "https://api.github.com/repos/zangys/Barotrauma_Modding_Tool_Enchanted/releases/latest"
+        
+        try:
+            response = requests.get(repo_api_url, timeout=10)
+            if response.status_code == 200:
+                latest_data = response.json()
+                latest_tag = latest_data.get("tag_name", "")
+                is_latest = AppConfig.version == latest_tag
+            else:
+                logger.warning(f"GitHub API Error: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Version check failed: {e}")
+
+        AppInterface._update_version_ui(is_latest)
+
+    @staticmethod
+    def _update_version_ui(is_latest: bool | None):
+        """Обновляет пункт меню с версией."""
+        if is_latest is True:
+            status = loc.get_string("base-yes")
+            should_enable = False 
+        elif is_latest is False:
+            status = loc.get_string("base-no")
+            should_enable = True
+        else:
+            status = loc.get_string("base-unknown")
+            should_enable = True
+
+        new_label = f"{loc.get_string('cur-version-latest')} {status}"
+        
+        # ИСПРАВЛЕНИЕ 2: Убран аргумент color, так как menu_item его не поддерживает в configure_item
+        if dpg.does_item_exist(AppInterface.TAG_VERSION_ITEM):
+            dpg.configure_item(
+                AppInterface.TAG_VERSION_ITEM, 
+                label=new_label, 
+                enabled=should_enable
             )
 
     @staticmethod
@@ -107,20 +131,14 @@ class AppInterface:
         try:
             command = app_data.strip()
             if command:
+                AppInterface._append_console_output(f"> {command}")
                 try:
                     exec_result = eval(command, globals())
                     if exec_result is not None:
-                        AppInterface._append_console_output(
-                            f"> {command}\n{exec_result}"
-                        )
-
-                    else:
-                        AppInterface._append_console_output(f"> {command}")
-
+                        AppInterface._append_console_output(str(exec_result))
                 except SyntaxError:
                     exec(command, globals())
-                    AppInterface._append_console_output(f"> {command}")
-
+                    
         except Exception as e:
             AppInterface._append_console_output(f"Error: {e}")
 
@@ -130,26 +148,32 @@ class AppInterface:
 
     @staticmethod
     def _append_console_output(text):
-        dpg.add_text(text, parent="console_output", wrap=0)
-        dpg.set_y_scroll("console_window", dpg.get_y_scroll_max("console_window"))
+        if dpg.does_item_exist("console_output"):
+            dpg.add_text(text, parent="console_output", wrap=0)
+            if dpg.does_item_exist("console_window"):
+                y_max = dpg.get_y_scroll_max("console_window")
+                dpg.set_y_scroll("console_window", y_max)
 
     @staticmethod
     def _setup_console():
         if dpg.does_item_exist("debug_console"):
             dpg.delete_item("debug_console")
 
-        with dpg.window(label="Debug Console", tag="debug_console", width=1, height=1):
+        with dpg.window(label="Debug Console", tag="debug_console", width=600, height=400):
             with dpg.child_window(
-                label="Output", tag="console_window", autosize_x=True, autosize_y=True
+                tag="console_window", border=True, autosize_x=True, height=-30
             ):
                 with dpg.group(tag="console_output"):
                     dpg.add_text("Debug Console Initialized")
 
             dpg.add_input_text(
                 label="Command",
+                tag="console_input",
                 on_enter=True,
                 callback=AppInterface._process_command,
+                width=-1
             )
+            dpg.focus_item("console_input")
 
         dpg_tools.rc_windows()
 
@@ -166,14 +190,15 @@ class AppInterface:
         auto_install_lua = AppConfig.get("game_config_auto_lua", False)
         try:
             Game.run_game(auto_install_lua, skip_intro)  # type: ignore
-
         except Exception as err:
-            AppInterface.show_error(err)
+            logger.error(f"Failed to start game: {err}")
+            AppInterface.show_error(str(err))
 
     @staticmethod
     def show_error(message):
-        with dpg.window(label="Error"):
-            dpg.add_text(message)
+        with dpg.window(label="Error", modal=True, width=400, height=150):
+            dpg.add_text(message, wrap=380)
+            dpg.add_button(label="OK", width=75, callback=lambda s, a, u: dpg.delete_item(dpg.get_item_parent(s)))
 
     @staticmethod
     def create_cac_window():
@@ -186,79 +211,69 @@ class AppInterface:
         try:
             with open(contributors_path, "r", encoding="utf-8") as f:
                 contributors_data = json.load(f)
-
         except Exception as e:
-            logger.error(f"{contributors_path} just fuck up: {e}")
+            logger.error(f"Failed to load contributors: {e}")
             return
 
         category_config = {
             "сaс-devs": {
                 "name_field": "name",
                 "info_field": "role",
-                "info_process": lambda val: loc.get_string(val),
+                "get_info": lambda v: loc.get_string(v),
             },
             "сaс-translators": {
                 "name_field": "name",
                 "info_field": "code",
-                "info_process": lambda val: loc.get_string(
-                    "cac-translators-thx", lang_code=loc.get_string(f"lang_code-{val}")
-                ),
+                "get_info": lambda v: loc.get_string("cac-translators-thx", lang_code=loc.get_string(f"lang_code-{v}")),
             },
             "cac-special-thanks": {
                 "name_field": "to",
                 "info_field": "desc",
-                "info_process": lambda val: loc.get_string(val),
+                "get_info": lambda v: loc.get_string(v),
             },
         }
 
         with dpg.window(
             label=loc.get_string("cac-window-name"),
             tag="cac_window",
-            no_collapse=True,
-            no_move=True,
-            no_resize=True,
+            width=500,
+            height=600,
+            no_collapse=True
         ):
             for category_label, contributors_list in contributors_data.items():
-                with dpg.collapsing_header(
-                    label=loc.get_string(category_label), default_open=True
-                ):
-                    if isinstance(contributors_list, list):
-                        for contributor in contributors_list:
-                            with dpg.group(horizontal=True):
-                                config = category_config.get(category_label)
-                                if config:
-                                    name = contributor.get(
-                                        config["name_field"],
-                                        loc.get_string("base-unknown"),
-                                    )
-                                    info_val = contributor.get(config["info_field"], "")
-                                    info_text = (
-                                        config["info_process"](info_val)
-                                        if info_val
-                                        else ""
-                                    )
-                                    dpg.add_text(name, color=(0, 150, 255))
-                                    if info_text:
-                                        dpg.add_text(
-                                            f"- {info_text}",
-                                            color=(200, 200, 200),
-                                            wrap=0,
-                                        )
+                if not isinstance(contributors_list, list): continue
+                
+                with dpg.collapsing_header(label=loc.get_string(category_label), default_open=True):
+                    conf = category_config.get(category_label)
+                    
+                    for person in contributors_list:
+                        name = person.get(conf["name_field"], "Unknown") if conf else "Unknown"
+                        
+                        info_text = ""
+                        if conf and conf["info_field"] in person:
+                            raw_info = person[conf["info_field"]]
+                            try:
+                                info_text = conf["get_info"](raw_info)
+                            except Exception:
+                                info_text = str(raw_info)
 
-            dpg_tools.rc_windows()
+                        with dpg.group(horizontal=True):
+                            dpg.add_text(f"• {name}", color=(0, 150, 255))
+                            if info_text:
+                                dpg.add_text(f"- {info_text}", color=(200, 200, 200), wrap=350)
 
     @staticmethod
     def rebuild_interface():
         current_tab = dpg.get_value("main_tab_bar")
 
         dpg.delete_item("main_tab_bar", children_only=True)
+        dpg.delete_item("main_view_bar")
 
+        AppInterface._create_viewport_menu_bar()
         SettingsTab.create()
         ModsTab.create()
 
-        dpg.set_value("main_tab_bar", current_tab)
-
-        dpg.delete_item("main_view_bar")
-        AppInterface._create_viewport_menu_bar()
+        if current_tab:
+            dpg.set_value("main_tab_bar", current_tab)
 
         dpg_tools.rc_windows()

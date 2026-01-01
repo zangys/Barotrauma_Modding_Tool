@@ -326,5 +326,19 @@ class ModUnit(Identifier):
             new_deps.append(dep)
 
         self.metadata.dependencies.extend(new_deps)
+        
+    def __getstate__(self):
+        """Метод для pickle: определяем, что сохранять."""
+        state = self.__dict__.copy()
+        # Удаляем Lock, так как его нельзя сохранить на диск
+        if "_lock" in state:
+            del state["_lock"]
+        return state
+
+    def __setstate__(self, state):
+        """Метод для pickle: восстанавливаем объект."""
+        self.__dict__.update(state)
+        # Создаем новый Lock при загрузке
+        self._lock = threading.Lock()
 
 Dependencie = Dependency

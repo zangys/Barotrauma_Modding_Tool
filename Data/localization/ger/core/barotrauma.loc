@@ -1,20 +1,15 @@
 hint-enter-barotrauma-path = Installationsverzeichnis eingeben
+hint-workshop-sync-path = ".../steamapps/workshop/content/602960"
 label-barotrauma-path-settings = Installationsverzeichnis-Einstellungen
-label-workshop-sync-path="Pfad für Workshop-Synchronisierung"
-hint-workshop-sync-path=".../steamapps/workshop/content/602960"
 label-current-path = Momentanes Verzeichnis:
 label-not-defined = Nicht festgelegt
 label-valid-path = Ist das Verzeichnis gültig?
+label-workshop-sync-path = "Pfad für Workshop-Synchronisierung"
 search-exp-game = Suche...
 search-exp-game-done = Wähle das Verzeichnis deiner Barotrauma-Installation:
 search-exp-game-none = Sorry, nichts gefunden.
+status-sync-done = "Erledigt! Neue Mods hinzugefügt.."
+status-sync-error = "Fehler! Einzelheiten finden Sie im Protokoll.."
+status-sync-no-new = "Keine neuen Mods gefunden."
+status-sync-running = "Synchronisation..."
 warning-exp-game-1 = Die Suche wird nach Bestätigung gestartet.
-
-
-status-sync-running="Synchronisation..."
-
-status-sync-done="Erledigt! Neue Mods hinzugefügt.."
-
-status-sync-no-new="Keine neuen Mods gefunden."
-
-status-sync-error="Fehler! Einzelheiten finden Sie im Protokoll.."

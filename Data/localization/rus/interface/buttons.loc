@@ -1,8 +1,14 @@
+btn-activate-all = Активировать все моды
 btn-search-game-fold = Найти игру по всем папкам компьютера
 btn-set-game-dir = Установить путь к Barotrauma
 btn-set-game-dir-desc = Установить путь к установленной Barotrauma
 btn-show-full-details = Показать полную информацию
 btn-sort-mods = Отсортировать активные модификации
 btn-sort-mods-desc = Сортирует активные модификации в алфавитном порядке с учётом зависимостей
-btn-activate-all = Активировать все моды
 btn-sync-workshop = Обновление списка модов
+btn-load-preset = Загрузить
+btn-save-preset = Сохранить
+btn-activate-all-desc = Переносит все неактивные моды в список активных
+tooltip-sync-workshop = Полностью обновляет список модов (пересканирует файлы на диске)
+label-presets = Пресеты:
+hint-new-preset-name = Название нового пресета...

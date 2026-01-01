@@ -1,7 +1,14 @@
+btn-activate-all = Activate all mods
 btn-search-game-fold = Find the game in all folders on your computer
 btn-set-game-dir = Set Barotrauma Directory
 btn-set-game-dir-desc = Set the path to your Barotrauma installation.
 btn-show-full-details = Show full details
 btn-sort-mods = Sort active mods
 btn-sort-mods-desc = Sorts active modifications alphabetically, taking into account dependencies
-btn-activate-all = Activate all mods
+btn-sync-workshop = Update mod list
+btn-load-preset = Load
+btn-save-preset = Save
+btn-activate-all-desc = Moves all inactive mods to the active list
+tooltip-sync-workshop = Reloads the mod list from disk (rescans files)
+label-presets = Presets:
+hint-new-preset-name = New Preset Name...

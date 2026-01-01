@@ -5,12 +5,12 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
-
+from datetime import datetime
 from Code.app_vars import AppConfig
 from Code.loc import Localization as loc
 from Code.package.dataclasses import ModUnit
 from Code.xml_object import XMLBuilder, XMLComment, XMLElement
-
+from .cache_manager import CacheManager
 from .condition_manager import process_condition
 from .parts_manager import PartsManager
 
@@ -34,6 +34,7 @@ class ModManager:
 
     @staticmethod
     def init():
+        CacheManager.init()
         ModManager.load_mods()
         ModManager.load_cslua_config()
         atexit.register(ModManager._on_exit)
@@ -43,10 +44,136 @@ class ModManager:
         try:
             if not (path / "filelist.xml").exists():
                 return None
-            return ModUnit.build(path)
+
+            cached_mod = CacheManager.get_cached_mod(path)
+            if cached_mod:
+                return cached_mod
+
+            mod = ModUnit.build(path)
+        
+            if mod:
+                CacheManager.update_cache(mod)
+            
+            return mod
+
         except Exception as e:
             logger.error(f"Error parsing mod folder {path.name}: {e}")
             return None
+
+    @staticmethod
+    def get_presets_dir() -> Optional[Path]:
+        game_path = ModManager.get_game_path()
+        if not game_path:
+            return None
+        
+        presets_path = game_path / "ModLists"
+        if not presets_path.exists():
+            try:
+                presets_path.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                return None
+        return presets_path
+
+    @staticmethod
+    def get_available_presets() -> List[str]:
+        p_dir = ModManager.get_presets_dir()
+        if not p_dir:
+            return []
+        
+        return sorted([
+            f.stem for f in p_dir.glob("*.xml") 
+            if f.is_file()
+        ])
+
+    @staticmethod
+    def load_preset(preset_name: str) -> Tuple[bool, List[str]]:
+        p_dir = ModManager.get_presets_dir()
+        if not p_dir:
+            return False, []
+        
+        file_path = p_dir / f"{preset_name}.xml"
+        if not file_path.exists():
+            return False, []
+
+        xml_obj = XMLBuilder.load(file_path)
+        if not xml_obj:
+            return False, []
+
+        new_active_mods = []
+        missing_mods = []
+        
+        local_mods_by_name = {
+            m.name: m for m in ModManager._mod_map.values() if m.local
+        }
+
+        for node in xml_obj.iter_non_comment_childrens():
+            tag = node.tag.lower()
+            mod_to_add = None
+            
+            if tag == "vanilla":
+                continue
+            
+            elif tag == "workshop":
+                w_id = node.attributes.get("id")
+                w_name = node.attributes.get("name", f"ID: {w_id}")
+                
+                mod_to_add = ModManager.get_mod_by_id(w_id)
+                if not mod_to_add:
+                    missing_mods.append(w_name)
+            
+            elif tag == "local":
+                l_name = node.attributes.get("name")
+                mod_to_add = local_mods_by_name.get(l_name)
+                if not mod_to_add:
+                    mod_to_add = next((m for m in ModManager._mod_map.values() if m.name == l_name), None)
+                
+                if not mod_to_add:
+                    missing_mods.append(l_name)
+
+            if mod_to_add:
+                if mod_to_add not in new_active_mods:
+                    new_active_mods.append(mod_to_add)
+
+        ModManager.active_mods = new_active_mods
+        
+        active_ids = {m.id for m in new_active_mods}
+        ModManager.inactive_mods = [
+            m for m in ModManager._mod_map.values() 
+            if m.id not in active_ids
+        ]
+        
+        for i, mod in enumerate(ModManager.active_mods, 1):
+            mod.load_order = i
+
+        logger.info(f"Loaded preset '{preset_name}'. Missing: {len(missing_mods)}")
+        return True, missing_mods
+
+    @staticmethod
+    def save_preset(preset_name: str) -> bool:
+        p_dir = ModManager.get_presets_dir()
+        if not p_dir:
+            return False
+
+        file_path = p_dir / f"{preset_name}.xml"
+        
+        root = XMLElement("mods")
+        
+        root.add_child(XMLElement("Vanilla"))
+        
+        for mod in ModManager.active_mods:
+            if mod.local:
+                root.add_child(XMLElement("Local", {"name": mod.name}))
+            else:
+        
+                w_id = mod.steam_id if mod.steam_id else mod.id
+                root.add_child(XMLElement("Workshop", {"name": mod.name, "id": w_id}))
+        
+        try:
+            XMLBuilder.save(root, file_path)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save preset {preset_name}: {e}")
+            return False
 
     @staticmethod
     def load_mods():
@@ -89,6 +216,7 @@ class ModManager:
                 for mod in results:
                     if mod:
                         loaded_mods_raw.append(mod)
+        CacheManager.save()
         unique_mods: Dict[str, ModUnit] = {}
         for mod in loaded_mods_raw:
             if mod.id not in unique_mods:

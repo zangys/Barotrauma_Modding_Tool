@@ -1,19 +1,15 @@
 hint-enter-barotrauma-path = Введите путь к игре
+hint-workshop-sync-path = ".../steamapps/workshop/content/602960"
 label-barotrauma-path-settings = Настройка пути к игре
-label-workshop-sync-path="Путь для синхронизации Мастерской"
-hint-workshop-sync-path=".../steamapps/workshop/content/602960"
 label-current-path = Текущий путь:
 label-not-defined = Не определено
 label-valid-path = Верный путь?
+label-workshop-sync-path = "Путь для синхронизации Мастерской"
 search-exp-game = Идёт поиск...
 search-exp-game-done = Выберите путь к вашей игре Barotrauma:
 search-exp-game-none = К сожалению, ничего не найдено.
+status-sync-done = "Готово! Новые моды добавлены."
+status-sync-error = "Ошибка! См. лог для деталей."
+status-sync-no-new = "Новых модов не найдено."
+status-sync-running = "Синхронизация..."
 warning-exp-game-1 = Поиск начнётся после вашего подтверждения
-
-status-sync-running="Синхронизация..."
-
-status-sync-done="Готово! Новые моды добавлены."
-
-status-sync-no-new="Новых модов не найдено."
-
-status-sync-error="Ошибка! См. лог для деталей."

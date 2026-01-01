@@ -41,14 +41,52 @@ class ModsTab:
     TAG_WARNING_TEXT = "warning_count_text"
     TAG_RELOAD_STATUS = "reload_status_text"
     TAG_BTN_RELOAD = "reload_mods_button"
+    TAG_PRESET_COMBO = "preset_combo"
+    TAG_PRESET_INPUT = "preset_new_name_input"
+    TAG_PRESET_MSG = "preset_status_msg"
 
     @staticmethod
     def create():
-        """Создает структуру вкладки модов."""
         with dpg.tab(label=loc.get_string("mod-tab-label"), parent="main_tab_bar", tag=ModsTab.TAG_TAB):
             ModsTab._create_toolbar()
             ModsTab._create_info_panel()
             
+            dpg.add_separator()
+
+            with dpg.group(horizontal=True):
+                dpg.add_text(loc.get_string("label-presets", default="Mod Presets:"))
+                
+                # Выпадающий список
+                presets = ModManager.get_available_presets()
+                dpg.add_combo(
+                    items=presets, 
+                    tag=ModsTab.TAG_PRESET_COMBO, 
+                    width=200,
+                    callback=ModsTab.on_preset_selected
+                )
+                
+                # Кнопка Загрузить
+                dpg.add_button(
+                    label=loc.get_string("btn-load-preset", default="Load"), 
+                    callback=ModsTab.on_load_preset_clicked
+                )
+
+                dpg.add_spacer(width=20)
+
+                # Сохранение нового
+                dpg.add_input_text(
+                    hint=loc.get_string("hint-new-preset-name", default="New Preset Name"), 
+                    tag=ModsTab.TAG_PRESET_INPUT, 
+                    width=150
+                )
+                dpg.add_button(
+                    label=loc.get_string("btn-save-preset", default="Save"), 
+                    callback=ModsTab.on_save_preset_clicked
+                )
+                
+                # Статус
+                dpg.add_text("", tag=ModsTab.TAG_PRESET_MSG, color=UIColors.WARNING)
+
             dpg.add_separator()
 
             with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchSame, 
@@ -396,3 +434,66 @@ class ModsTab:
         else:
             logging.warning("App.ui_tasks_queue not found, executing UI update directly from thread.")
             callback(*args, **kwargs)
+
+    @staticmethod
+    def on_preset_selected(sender, app_data):
+        # Очищаем сообщение об ошибке при выборе
+        dpg.set_value(ModsTab.TAG_PRESET_MSG, "")
+
+    @staticmethod
+    def on_load_preset_clicked():
+        preset_name = dpg.get_value(ModsTab.TAG_PRESET_COMBO)
+        if not preset_name:
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Select a preset first!")
+            return
+
+        success, missing = ModManager.load_preset(preset_name)
+        
+        if success:
+            ModsTab.render_mods()
+            if missing:
+                dpg.set_value(ModsTab.TAG_PRESET_MSG, f"Loaded with missing mods: {len(missing)}")
+                # Можно вывести в консоль/лог подробности
+                logger.warning(f"Missing mods in preset '{preset_name}': {missing}")
+            else:
+                dpg.set_value(ModsTab.TAG_PRESET_MSG, "Preset loaded successfully.")
+                # Сбрасываем цвет на зеленый (если есть возможность, иначе просто текст)
+        else:
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Failed to load preset!")
+
+    @staticmethod
+    def on_save_preset_clicked():
+        name = dpg.get_value(ModsTab.TAG_PRESET_INPUT).strip()
+        if not name:
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Enter a name first!")
+            return
+        
+        # Простая валидация имени файла
+        invalid_chars = '<>:"/\\|?*'
+        if any(char in invalid_chars for char in name):
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Invalid characters in name!")
+            return
+
+        if ModManager.save_preset(name):
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, f"Saved '{name}'!")
+            # Обновляем список комбобокса
+            presets = ModManager.get_available_presets()
+            dpg.configure_item(ModsTab.TAG_PRESET_COMBO, items=presets)
+            dpg.set_value(ModsTab.TAG_PRESET_COMBO, name)
+            dpg.set_value(ModsTab.TAG_PRESET_INPUT, "") # Очистить поле ввода
+        else:
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Error saving preset.")
+
+    # Также нужно обновить список пресетов при перезагрузке модов
+    @staticmethod
+    def _finalize_reload(success: bool):
+        # ... старый код ...
+        ModsTab.render_mods()
+        status_text = "Готово!" if success else "Ошибка!"
+        dpg.set_value(ModsTab.TAG_RELOAD_STATUS, status_text)
+        dpg.configure_item(ModsTab.TAG_BTN_RELOAD, enabled=True)
+        
+        # ОБНОВЛЕНИЕ СПИСКА ПРЕСЕТОВ
+        if success:
+            presets = ModManager.get_available_presets()
+            dpg.configure_item(ModsTab.TAG_PRESET_COMBO, items=presets)

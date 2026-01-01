@@ -1,20 +1,15 @@
 hint-enter-barotrauma-path = Enter the game path
+hint-workshop-sync-path = ".../steamapps/workshop/content/602960"
 label-barotrauma-path-settings = Game Path Settings
-label-workshop-sync-path="Path for Workshop Sync"
-hint-workshop-sync-path=".../steamapps/workshop/content/602960"
 label-current-path = Current path:
 label-not-defined = Not defined
 label-valid-path = Is the path valid?
+label-workshop-sync-path = "Path for Workshop Sync"
 search-exp-game = Searching...
 search-exp-game-done = Select the path to your Barotrauma game:
 search-exp-game-none = Sorry, nothing found.
+status-sync-done = "Done! New mods added.."
+status-sync-error = "Error! See log for details.."
+status-sync-no-new = "No new mods found."
+status-sync-running = "Synchronization..."
 warning-exp-game-1 = Search will start after your confirmation
-
-
-status-sync-running="Synchronization..."
-
-status-sync-done="Done! New mods added.."
-
-status-sync-no-new="No new mods found."
-
-status-sync-error="Error! See log for details.."
