@@ -1,218 +1,206 @@
 import logging
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Set
+from typing import List, Optional, Set, Pattern
 
 from Code.app_vars import AppConfig
 from Code.package import ModUnit
 from Code.xml_object import XMLBuilder, XMLComment, XMLElement
-
 from .condition_manager import process_condition
 
 logger = logging.getLogger(__name__)
 
 
-# TODO: Это бы рефакторнуть разок
 class PartsManager:
-    # BTM: conditions="", setState="on/off": start
-    # BTM: end
-    @staticmethod
-    def do_chenges(mod: ModUnit, active_mod_ids: Set[str]):
-        PartsManager._corrupt_xml_by_config(mod.path, active_mod_ids)
+    _RE_BTM_START = "BTM:.*start"
+    _RE_BTM_END = "BTM:.*end"
+    _RE_COND: Pattern = re.compile(r'conditions="(.*?)"')
+    _RE_STATE: Pattern = re.compile(r'setState="(.*?)"')
 
-        for xml_path in mod.path.rglob("*.xml"):
-            if xml_path.name.lower() in AppConfig.xml_system_dirs:
-                continue
+    @classmethod
+    def do_changes(cls, mod: ModUnit, active_mod_ids: Set[str]) -> None:
+        cls._process_config(mod.path, active_mod_ids, is_rollback=False)
+        cls._process_files_concurrently(mod.path, active_mod_ids, is_rollback=False)
 
-            with ThreadPoolExecutor() as executor:
-                executor.submit(
-                    PartsManager._corrupt_xml_by_commits, xml_path, active_mod_ids
-                )
+    @classmethod
+    def rollback_changes(cls, mod: ModUnit) -> None:
+        cls._process_config(mod.path, set(), is_rollback=True)
+        cls._process_files_concurrently(mod.path, set(), is_rollback=True)
 
-    @staticmethod
-    def rollback_chenges(mod: ModUnit):
-        PartsManager._fix_xml_by_config(mod.path)
+    @classmethod
+    def rollback_changes_no_thread(cls, mod: ModUnit) -> None:
+        cls._process_config(mod.path, set(), is_rollback=True)
+        
+        # Синхронный обход
+        files = cls._get_target_files(mod.path)
+        for xml_path in files:
+            cls._process_single_xml(xml_path, set(), is_rollback=True)
 
-        for xml_path in mod.path.rglob("*.xml"):
-            if xml_path.name.lower() in AppConfig.xml_system_dirs:
-                continue
-
-            with ThreadPoolExecutor() as executor:
-                executor.submit(PartsManager._fix_xml_by_commits, xml_path)
-
-    @staticmethod
-    def rollback_changes_no_thread(mod: ModUnit):
-        PartsManager._fix_xml_by_config(mod.path)
-
-        for xml_path in mod.path.rglob("*.xml"):
-            if xml_path.name.lower() in AppConfig.xml_system_dirs:
-                continue
-
-            PartsManager._fix_xml_by_commits(xml_path)
+    # --- Internals ---
 
     @staticmethod
-    def _corrupt_xml_by_commits(file_path: Path, active_mod_ids: Set[str]):
-        PartsManager._by_xml(file_path, active_mod_ids)
+    def _get_target_files(mod_path: Path) -> List[Path]:
+        return [
+            p for p in mod_path.rglob("*.xml")
+            if p.name.lower() not in AppConfig.xml_system_dirs
+        ]
 
-    @staticmethod
-    def _corrupt_xml_by_config(mod_path: Path, active_mod_ids: Set[str]):
-        PartsManager._by_config(mod_path, active_mod_ids)
+    @classmethod
+    def _process_files_concurrently(cls, mod_path: Path, active_mod_ids: Set[str], is_rollback: bool):
+        files = cls._get_target_files(mod_path)
+        if not files:
+            return
+        max_workers = min(32, (os.cpu_count() or 4) * 4)
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(cls._process_single_xml, f, active_mod_ids, is_rollback)
+                for f in files
+            ]
 
-    @staticmethod
-    def _fix_xml_by_commits(file_path: Path):
-        PartsManager._by_xml(file_path, is_fix=True)
+    @classmethod
+    def _process_single_xml(cls, file_path: Path, active_mod_ids: Set[str], is_rollback: bool):
+        try:
+            xml_obj = XMLBuilder.load(file_path)
+            if xml_obj is None:
+                return
 
-    @staticmethod
-    def _fix_xml_by_config(mod_path: Path):
-        PartsManager._by_config(mod_path, is_fix=True)
+            modified = False
+            iterator = xml_obj.find_between_comments(cls._RE_BTM_START, cls._RE_BTM_END)
+            
+            for com_start, content_objects, _ in iterator:
+                cond_match = cls._RE_COND.search(com_start.content)
+                state_match = cls._RE_STATE.search(com_start.content)
 
-    @staticmethod
-    def _by_xml(
-        file_path: Path, active_mod_ids: Set[str] = set(), is_fix: bool = False
-    ):
-        xml_obj = XMLBuilder.load(file_path)
-        if xml_obj is None:
+                if not state_match:
+                    logger.error(f"Missing setState in {file_path}")
+                    continue
+                state_str = state_match.group(1).lower()
+                target_is_active = state_str in ("on", "1", "true")
+
+                should_be_active = False
+
+                if is_rollback:
+                    should_be_active = not target_is_active
+                else:
+                    condition_val = cond_match.group(1) if cond_match else None
+                    if condition_val and not process_condition(condition_val, active_mod_ids=active_mod_ids):
+                        continue
+                    
+                    should_be_active = target_is_active
+
+                for obj in content_objects:
+                    if obj.index is None: 
+                        continue
+
+                    is_currently_element = isinstance(obj, XMLElement)
+                    is_currently_comment = isinstance(obj, XMLComment)
+
+                    new_obj = None
+
+                    if should_be_active and is_currently_comment:
+                        try:
+                            new_obj = obj.to_element()
+                        except Exception:
+                            continue
+                            
+                    elif not should_be_active and is_currently_element:
+                        new_obj = obj.to_comment()
+
+                    if new_obj:
+                        xml_obj.replace(obj.index, new_obj)
+                        modified = True
+
+            if modified:
+                XMLBuilder.save(xml_obj, file_path)
+
+        except Exception as e:
+            logger.error(f"Error processing XML {file_path}: {e}")
+
+    @classmethod
+    def _process_config(cls, mod_path: Path, active_mod_ids: Set[str], is_rollback: bool):
+        modparts_path = mod_path / "modparts.xml"
+        filelist_path = mod_path / "filelist.xml"
+
+        if not modparts_path.exists() or not filelist_path.exists():
             return
 
-        for com_start, objs, com_end in xml_obj.find_between_comments(
-            "BTM:.*start", "BTM:.*end"
-        ):
-            if not is_fix:
-                match = re.search(r'conditions="(.*?)"', com_start.content)
-                if match:
-                    condition_value = match.group(1)
-                else:
-                    logger.error(
-                        f"Error in searching for switching conditions value\n|Path: {file_path}"
-                    )
+        xml_parts = XMLBuilder.load(modparts_path)
+        xml_filelist = XMLBuilder.load(filelist_path)
+
+        if not xml_parts or not xml_filelist:
+            return
+
+        filelist_modified = False
+
+        for action in xml_parts.iter_non_comment_childrens():
+            if not is_rollback:
+                cond_attr = action.get_attribute_ignore_case("conditions")
+                if cond_attr and not process_condition(cond_attr, active_mod_ids=active_mod_ids):
                     continue
 
-            match = re.search(r'setState="(.*?)"', com_start.content)
-            if match:
-                set_to = (
-                    not is_fix
-                    if match.group(1).lower() in ["on", "1", "true"]
-                    else is_fix
-                )
+            rel_path_raw = action.get_attribute_ignore_case("file")
+            target_tag = action.get_attribute_ignore_case("type")
+            set_state_raw = action.get_attribute_ignore_case("setState")
+
+            if not all((rel_path_raw, target_tag, set_state_raw)):
+                continue
+
+            target_is_active = set_state_raw.lower() in ("on", "1", "true")
+            should_be_active = not target_is_active if is_rollback else target_is_active
+
+            for item in xml_filelist.childrens:
+                check_item = item
+                is_comment = isinstance(item, XMLComment)
+                
+                if is_comment:
+                    try:
+                        check_item = item.to_element()
+                    except Exception:
+                        continue
+                
+                item_tag = check_item.tag
+                item_file_attr = check_item.get_attribute_ignore_case("file")
+
+                if not item_tag or not item_file_attr:
+                    continue
+
+                if (item_tag.lower() == target_tag.lower() and 
+                    Path(item_file_attr).as_posix() == Path(rel_path_raw).as_posix()):
+                    if should_be_active and is_comment:
+                        xml_filelist.replace(item.index, new_node)
+                        filelist_modified = True
+                        cls._rename_file_on_disk(rel_path_raw, to_active=True)
+
+                    elif not should_be_active and not is_comment:
+                        new_node = item.to_comment()
+                        xml_filelist.replace(item.index, new_node)
+                        filelist_modified = True
+                        cls._rename_file_on_disk(rel_path_raw, to_active=False)
+                    break 
+
+        if filelist_modified:
+            XMLBuilder.save(xml_filelist, filelist_path)
+
+    @staticmethod
+    def _rename_file_on_disk(raw_path: str, to_active: bool):
+        try:
+            resolved_path_str = raw_path.replace("%ModDir%", str(AppConfig.get_steam_mod_path())) \
+                                        .replace("LocalMods", str(AppConfig.get_local_mod_path()))
+            
+            target_path = Path(resolved_path_str)
+            
+            if to_active:
+                if target_path.suffix == ".xml":
+                    current_disabled = target_path.with_name(target_path.stem + ".xml_off")
+                    if current_disabled.exists():
+                        current_disabled.rename(target_path)
             else:
-                logger.error(
-                    f"Error in searching for set state value\n|Path: {file_path}"
-                )
-                continue
+                if target_path.exists() and target_path.suffix == ".xml":
+                    new_disabled = target_path.with_name(target_path.stem + ".xml_off")
+                    target_path.rename(new_disabled)
 
-            if not is_fix:
-                if not process_condition(  # ERROR
-                    condition_value,  # type: ignore
-                    active_mod_ids=active_mod_ids,
-                ):
-                    continue
-
-            for obj in objs:
-                if obj.index is None:
-                    continue
-
-                if set_to:
-                    if isinstance(obj, XMLElement):
-                        continue
-
-                else:
-                    if isinstance(obj, XMLComment):
-                        continue
-
-                try:
-                    if isinstance(obj, XMLComment):
-                        xml_obj.replace(obj.index, obj.to_element())
-                    else:
-                        xml_obj.replace(obj.index, obj.to_comment())
-
-                except Exception:
-                    continue
-
-        XMLBuilder.save(xml_obj, file_path)
-
-    @staticmethod
-    def _by_config(
-        mod_path: Path, active_mod_ids: Set[str] = set(), is_fix: bool = False
-    ):
-        xml_obj = XMLBuilder.load((mod_path / "modparts.xml"))
-        xml_file_list = XMLBuilder.load((mod_path / "filelist.xml"))
-
-        if not all((xml_obj, xml_file_list)):
-            return
-
-        for action in xml_obj.iter_non_comment_childrens():  # type: ignore
-            if not is_fix:
-                if not process_condition(
-                    action.get_attribute_ignore_case("conditions"),
-                    active_mod_ids=active_mod_ids,
-                ):
-                    continue
-
-            path_to_file = action.get_attribute_ignore_case("file")
-            cond_type = action.get_attribute_ignore_case("type")
-            set_to = action.get_attribute_ignore_case("setState")
-
-            if not all((path_to_file, cond_type, set_to)):
-                continue
-
-            set_to = not is_fix if set_to in ["on", "1", "true"] else is_fix
-
-            for item in xml_file_list.childrens:  # type: ignore # TODO Think about optimization
-                if isinstance(item, XMLComment):
-                    try:
-                        tmp_item = item.to_element()
-
-                    except Exception:
-                        continue
-
-                else:
-                    tmp_item = item
-
-                tag_item = tmp_item.tag
-                item_file = tmp_item.get_attribute_ignore_case("file")
-                if not all((tag_item, item_file)):
-                    continue
-
-                if set_to:
-                    if isinstance(item, XMLElement):
-                        continue
-
-                else:
-                    if isinstance(item, XMLComment):
-                        continue
-
-                if tag_item == cond_type and item_file == path_to_file:
-                    try:
-                        if isinstance(item, XMLComment):
-                            xml_file_list.replace(item.index, item.to_element())  # type: ignore
-                            path_to_file.replace(  # type: ignore
-                                "%ModDir%",
-                                AppConfig.get_steam_mod_path(),  # type: ignore
-                            )
-                            path_to_file.replace(  # type: ignore
-                                "LocalMods",
-                                AppConfig.get_local_mod_path(),  # type: ignore
-                            )
-                            path_xml = Path(path_to_file)  # type: ignore
-                            if path_xml.exists():
-                                path_xml.rename(path_xml.stem + "xml_off")
-
-                        else:
-                            xml_file_list.replace(item.index, item.to_comment())  # type: ignore
-                            path_to_file.replace(  # type: ignore
-                                "%ModDir%",
-                                AppConfig.get_steam_mod_path(),  # type: ignore
-                            )
-                            path_to_file.replace(  # type: ignore
-                                "LocalMods",
-                                AppConfig.get_local_mod_path(),  # type: ignore
-                            )
-                            path_xml = Path(path_to_file)  # type: ignore
-                            if path_xml.exists():
-                                path_xml.rename(path_xml.stem + "xml")
-
-                    except Exception:
-                        continue
-
-        XMLBuilder.save(xml_file_list, (mod_path / "filelist.xml"))  # type: ignore
+        except Exception as e:
+            logger.error(f"Failed to rename file {raw_path}: {e}")

@@ -1,10 +1,10 @@
 import atexit
 import logging
-import shutil
+import os
 from collections import defaultdict, deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from Code.app_vars import AppConfig
 from Code.loc import Localization as loc
@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 class ModManager:
     active_mods: List[ModUnit] = []
     inactive_mods: List[ModUnit] = []
+    _mod_map: Dict[str, ModUnit] = {}
+    _game_path_cache: Optional[Path] = None
+
+    @staticmethod
+    def get_game_path() -> Optional[Path]:
+        if ModManager._game_path_cache:
+            return ModManager._game_path_cache
+        path = AppConfig.get_game_path()
+        if path:
+            ModManager._game_path_cache = path
+        return path
 
     @staticmethod
     def init():
@@ -28,200 +39,210 @@ class ModManager:
         atexit.register(ModManager._on_exit)
 
     @staticmethod
+    def _parse_mod_safe(path: Path) -> Optional[ModUnit]:
+        try:
+            if not (path / "filelist.xml").exists():
+                return None
+            return ModUnit.build(path)
+        except Exception as e:
+            logger.error(f"Error parsing mod folder {path.name}: {e}")
+            return None
+
+    @staticmethod
     def load_mods():
-        game_path = AppConfig.get_game_path()
+        game_path = ModManager.get_game_path()
         if not game_path:
             return
 
         ModManager.active_mods.clear()
         ModManager.inactive_mods.clear()
+        ModManager._mod_map.clear()
 
-        active_mod_configs = ModManager._get_active_mod_configs(game_path / "config_player.xml")
+        config_player = game_path / "config_player.xml"
+        active_mod_configs = ModManager._get_active_mod_configs(config_player)
+        paths_to_check = [
+            game_path / "LocalMods",
+            Path(AppConfig.get("workshop_sync_path") or ""),
+            Path(AppConfig.get("steam_mod_dir") or "")
+        ]
 
-        all_mods = {}
+        mod_folders_to_process = []
+        seen_paths = set()
 
-        def process_mod_folder(path: Path):
-            if not path or not path.is_dir() or path.name.startswith('.'):
-                return
-            if not (path / "filelist.xml").exists():
-                logger.debug(f"Пропускаем папку без filelist.xml: {path}")
-                return
-            
-            try:
-                mod = ModUnit.build(path)
-                if mod:
-                    all_mods[mod.id] = mod
-            except Exception as e:
-                logger.error(f"Ошибка при обработке папки мода {path.name}: {e}")
+        for p in paths_to_check:
+            if p and p.name and p.exists():
+                try:
+                    for item in p.iterdir():
+                        if item.is_dir() and not item.name.startswith('.') and item not in seen_paths:
+                            mod_folders_to_process.append(item)
+                            seen_paths.add(item)
+                except OSError:
+                    continue
+        cpu_count = os.cpu_count() or 4
+        max_workers = min(16, cpu_count * 2) 
+        
+        loaded_mods_raw = []
+        if mod_folders_to_process:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(executor.map(ModManager._parse_mod_safe, mod_folders_to_process))
+                
+                for mod in results:
+                    if mod:
+                        loaded_mods_raw.append(mod)
+        unique_mods: Dict[str, ModUnit] = {}
+        for mod in loaded_mods_raw:
+            if mod.id not in unique_mods:
+                unique_mods[mod.id] = mod
+            else:
+                if mod.local and not unique_mods[mod.id].local:
+                    unique_mods[mod.id] = mod
+        
+        ModManager._mod_map = unique_mods.copy()
 
-        scan_paths = [game_path / "LocalMods"]
-        workshop_content_path_str = AppConfig.get("workshop_sync_path")
-        if workshop_content_path_str:
-            scan_paths.append(Path(workshop_content_path_str))
-        legacy_workshop_path_str = AppConfig.get("steam_mod_dir")
-        if legacy_workshop_path_str:
-            scan_paths.append(Path(legacy_workshop_path_str))
-
-        for path in scan_paths:
-            if path and path.exists():
-                for mod_folder in path.iterdir():
-                    process_mod_folder(mod_folder)
-
-        for mod_id, mod in all_mods.items():
-            if mod_id in active_mod_configs:
-                mod.load_order = active_mod_configs[mod_id]
+        for mod in unique_mods.values():
+            if mod.id in active_mod_configs:
+                mod.load_order = active_mod_configs[mod.id]
                 ModManager.active_mods.append(mod)
             else:
                 ModManager.inactive_mods.append(mod)
 
-        ModManager.active_mods.sort(key=lambda m: m.load_order)
+        ModManager.active_mods.sort(key=lambda m: m.load_order if m.load_order is not None else 9999)
 
     @staticmethod
-    def _get_active_mod_configs(path_to_config_player: Path) -> dict:
-        """Вспомогательный метод: читает config_player.xml и возвращает словарь {mod_id: load_order}."""
-        if not path_to_config_player.exists():
+    def _get_active_mod_configs(path_to_config: Path) -> Dict[str, int]:
+        if not path_to_config.exists():
             return {}
 
-        xml_obj = XMLBuilder.load(path_to_config_player)
+        xml_obj = XMLBuilder.load(path_to_config)
         if not xml_obj:
             return {}
 
-        active_mod_configs = {}
-
-        packages = xml_obj.find_only_elements("package")
-        package_paths = [
-            (i, package.attributes.get("path"))
-            for i, package in enumerate(packages, start=1)
-            if package.tag == "package" and package.attributes.get("path")
-        ]
-
-        for index, path_str in package_paths:
+        active_configs = {}
+        packages = list(xml_obj.find_only_elements("package"))
+        
+        for i, pkg in enumerate(packages, start=1):
+            path_attr = pkg.attributes.get("path")
+            if not path_attr:
+                continue
+            
             try:
-
-                mod_folder_name = Path(path_str).parent.name
-
-                if mod_folder_name.isdigit():
-                    active_mod_configs[mod_folder_name] = index
-                else:
-                    pass # TODO: Improve LocalMod ID detection
+                parts = path_attr.replace('\\', '/').split('/')
+                if len(parts) >= 2:
+                    mod_id = parts[-2]
+                    active_configs[mod_id] = i
             except Exception:
-                continue # Игнорируем некорректные пути
+                continue
 
-        return active_mod_configs
+        return active_configs
 
     @staticmethod
     def load_cslua_config():
-        game_path = AppConfig.get_game_path()
+        game_path = ModManager.get_game_path()
         if not game_path:
             return
 
-        # LUA
-        lua_dep_path = game_path / "Barotrauma.deps.json"
-        if lua_dep_path.exists():
-            with open(lua_dep_path, "r", encoding="utf-8") as file:
-                has_lua = "Luatrauma" in file.read()
-                AppConfig.set("has_lua", has_lua)
-                logger.debug(f"Lua support enabled: {has_lua}")
+        lua_path = game_path / "Barotrauma.deps.json"
+        has_lua = False
+        if lua_path.exists():
+            try:
+                content = lua_path.read_text(encoding="utf-8")
+                has_lua = "Luatrauma" in content
+            except Exception:
+                pass
+        
+        AppConfig.set("has_lua", has_lua)
+        if has_lua:
+            logger.debug(f"Lua support enabled: {has_lua}")
 
-        else:
-            AppConfig.set("has_lua", False)
-            logger.debug("Barotrauma.deps.json not found, disabling Lua support.")
-
-        # CS
-        config_path = game_path / "LuaCsSetupConfig.xml"
-        if config_path.exists():
-            xml_obj = XMLBuilder.load(config_path)
-            has_cs = (
-                xml_obj.attributes.get("EnableCsScripting", "false").lower() == "true"
-                if xml_obj
-                else False
-            )
-            AppConfig.set("has_cs", has_cs)
+        cs_path = game_path / "LuaCsSetupConfig.xml"
+        has_cs = False
+        if cs_path.exists():
+            try:
+                xml_obj = XMLBuilder.load(cs_path)
+                has_cs = (
+                    xml_obj.attributes.get("EnableCsScripting", "false").lower() == "true"
+                    if xml_obj else False
+                )
+            except Exception:
+                pass
+        
+        AppConfig.set("has_cs", has_cs)
+        if has_cs:
             logger.debug(f"CS scripting enabled: {has_cs}")
-
-        else:
-            AppConfig.set("has_cs", False)
-            logger.debug("LuaCsSetupConfig.xml not found, disabling CS scripting.")
-
-    @staticmethod
-    def find_mod_by_id(mod_id: str) -> Optional[ModUnit]:
-        for mod in ModManager.active_mods + ModManager.inactive_mods:
-            if mod.id == mod_id:
-                return mod
-
-        return None
 
     @staticmethod
     def get_mod_by_id(mod_id: str) -> Optional[ModUnit]:
-        for mod in ModManager.active_mods + ModManager.inactive_mods:
-            if mod.id == mod_id:
-                return mod
-
-        return None
+        return ModManager._mod_map.get(mod_id)
+    
+    find_mod_by_id = get_mod_by_id
 
     @staticmethod
     def activate_mod(mod_id: str) -> bool:
-        mod = ModManager.get_mod_by_id(mod_id)
-        if mod and mod in ModManager.inactive_mods:
+        mod = ModManager._mod_map.get(mod_id)
+        if not mod:
+            return False
+            
+        if mod in ModManager.inactive_mods:
             ModManager.inactive_mods.remove(mod)
             ModManager.active_mods.append(mod)
             return True
-
         return False
 
     @staticmethod
     def deactivate_mod(mod_id: str) -> bool:
-        mod = ModManager.get_mod_by_id(mod_id)
-        if mod and mod in ModManager.active_mods:
+        mod = ModManager._mod_map.get(mod_id)
+        if not mod:
+            return False
+
+        if mod in ModManager.active_mods:
             ModManager.active_mods.remove(mod)
             ModManager.inactive_mods.append(mod)
             return True
-
         return False
         
     @staticmethod
     def activate_all_mods():
+        if not ModManager.inactive_mods:
+            return
         ModManager.active_mods.extend(ModManager.inactive_mods)
         ModManager.inactive_mods.clear()
         logger.info("all mods active")
 
     @staticmethod
     def swap_active_mods(mod_id1: str, mod_id2: str) -> None:
-        mod1 = ModManager.get_mod_by_id(mod_id1)
-        mod2 = ModManager.get_mod_by_id(mod_id2)
-        if (
-            mod1
-            and mod2
-            and mod1 in ModManager.active_mods
-            and mod2 in ModManager.active_mods
-        ):
-            idx1, idx2 = (
-                ModManager.active_mods.index(mod1),
-                ModManager.active_mods.index(mod2),
-            )
-            ModManager.active_mods[idx1], ModManager.active_mods[idx2] = (
-                ModManager.active_mods[idx2],
-                ModManager.active_mods[idx1],
-            )
+        if mod_id1 not in ModManager._mod_map or mod_id2 not in ModManager._mod_map:
+            return
+        
+        try:
+            idx1 = -1
+            idx2 = -1
+            for i, m in enumerate(ModManager.active_mods):
+                if m.id == mod_id1: idx1 = i
+                elif m.id == mod_id2: idx2 = i
+                
+                if idx1 != -1 and idx2 != -1:
+                    break
+            
+            if idx1 != -1 and idx2 != -1:
+                ModManager.active_mods[idx1], ModManager.active_mods[idx2] = (
+                    ModManager.active_mods[idx2],
+                    ModManager.active_mods[idx1],
+                )
+        except Exception:
+            pass
 
     @staticmethod
     def swap_inactive_mods(mod_id1: str, mod_id2: str) -> None:
-        mod1 = ModManager.get_mod_by_id(mod_id1)
-        mod2 = ModManager.get_mod_by_id(mod_id2)
-        if (
-            mod1
-            and mod2
-            and mod1 in ModManager.inactive_mods
-            and mod2 in ModManager.inactive_mods
-        ):
-            idx1, idx2 = (
-                ModManager.inactive_mods.index(mod1),
-                ModManager.inactive_mods.index(mod2),
-            )
-            ModManager.inactive_mods[idx1], ModManager.inactive_mods[idx2] = (
-                ModManager.inactive_mods[idx2],
-                ModManager.inactive_mods[idx1],
-            )
+        try:
+            m1 = ModManager.get_mod_by_id(mod_id1)
+            m2 = ModManager.get_mod_by_id(mod_id2)
+            if m1 and m2 and m1 in ModManager.inactive_mods and m2 in ModManager.inactive_mods:
+                idx1 = ModManager.inactive_mods.index(m1)
+                idx2 = ModManager.inactive_mods.index(m2)
+                ModManager.inactive_mods[idx1], ModManager.inactive_mods[idx2] = \
+                    ModManager.inactive_mods[idx2], ModManager.inactive_mods[idx1]
+        except ValueError:
+            pass
 
     @staticmethod
     def move_active_mod_to_end(mod_id: str) -> None:
@@ -239,104 +260,84 @@ class ModManager:
 
     @staticmethod
     def save_mods() -> None:
-        game_path = AppConfig.get("barotrauma_dir", None)
-        if not game_path:
-            logger.error("Game path not set!")
-            return
-
-        game_path = Path(game_path)
-        if not game_path.exists():
+        game_path = ModManager.get_game_path()
+        if not game_path or not game_path.exists():
             logger.error(f"Game path does not exist!\n|Path: {game_path}")
             return
 
         user_config_path = game_path / "config_player.xml"
         if not user_config_path.exists():
-            logger.error(
-                f"config_player.xml does not exist!\n|Path: {user_config_path}"
-            )
+            logger.error(f"config_player.xml does not exist!\n|Path: {user_config_path}")
             return
 
-        user_config_path = user_config_path.resolve()
-        if not user_config_path.is_file():
-            logger.error(f"Resolved path is not a valid file: {user_config_path}")
-            return
+        try:
+            xml_obj = XMLBuilder.load(user_config_path)
+            if not xml_obj:
+                logger.error(f"Invalid config_player.xml\n|Path: {user_config_path}")
+                return
 
-        xml_obj = XMLBuilder.load(user_config_path)
-        if xml_obj is None:
-            logger.error(f"Invalid config_player.xml\n|Path: {user_config_path}")
-            return
+            regularpackages_list = list(xml_obj.find_only_elements("regularpackages"))
+            
+            if not regularpackages_list:
+                reg_pkg_node = XMLElement("regularpackages")
+                xml_obj.add_child(reg_pkg_node)
+            else:
+                reg_pkg_node = regularpackages_list[0]
+            
+            reg_pkg_node.childrens.clear()
 
-        regularpackages = next(
-            (item for item in xml_obj.find_only_elements("regularpackages")), None
-        )
-        if regularpackages is None:
-            logger.error("No 'regularpackages' element found in config_player.xml.")
-            return
+            active_ids_set = {mod.id for mod in ModManager.active_mods}
 
-        regularpackages.childrens.clear()
+            for mod in ModManager.active_mods:
+                if mod.has_toggle_content:
+                    try:
+                        PartsManager.do_chenges(mod, active_ids_set)
+                    except AttributeError:
+                        if hasattr(PartsManager, 'do_changes'):
+                            PartsManager.do_changes(mod, active_ids_set)
 
-        active_mod_id = set([mod.id for mod in ModManager.active_mods])
-        for mod in ModManager.active_mods:
-            if mod.has_toggle_content:
-                PartsManager.do_chenges(mod, active_mod_id)
+                mod_path = mod.str_path 
+                reg_pkg_node.add_child(XMLComment(mod.name))
+                reg_pkg_node.add_child(
+                    XMLElement("package", {"path": f"{mod_path}/filelist.xml"})
+                )
 
-            mod_path = mod.get_str_path()
-            regularpackages.add_child(XMLComment(mod.name))
-            regularpackages.add_child(
-                XMLElement("package", {"path": f"{mod_path}/filelist.xml"})
-            )
-
-        del active_mod_id
-
-        XMLBuilder.save(xml_obj, user_config_path)
+            temp_path = user_config_path.with_suffix('.tmp')
+            XMLBuilder.save(xml_obj, temp_path)
+            if temp_path.exists():
+                temp_path.replace(user_config_path)
+            
+        except Exception as e:
+            logger.error(f"Error saving mods: {e}", exc_info=True)
 
     @staticmethod
     def _on_exit():
         try:
-            if not (ModManager.active_mods + ModManager.inactive_mods):
+            if not ModManager.active_mods:
                 return
 
-            game_path = AppConfig.get("barotrauma_dir", None)
+            game_path = ModManager.get_game_path()
             if not game_path:
-                logger.error("Game path not set!")
-                return
-
-            game_path = Path(game_path)
-            if not game_path.exists():
-                logger.error(f"Game path does not exist!\n|Path: {game_path}")
                 return
 
             user_config_path = game_path / "config_player.xml"
             if not user_config_path.exists():
-                logger.error(
-                    f"config_player.xml does not exist!\n|Path: {user_config_path}"
-                )
-                return
-
-            user_config_path = user_config_path.resolve()
-            if not user_config_path.is_file():
-                logger.error(f"Resolved path is not a valid file: {user_config_path}")
                 return
 
             xml_obj = XMLBuilder.load(user_config_path)
-            if xml_obj is None:
-                logger.error(f"Invalid config_player.xml\n|Path: {user_config_path}")
-                return
+            if not xml_obj: return
 
-            regularpackages = next(
-                (item for item in xml_obj.find_only_elements("regularpackages")), None
-            )
-            if regularpackages is None:
-                logger.error("No 'regularpackages' element found in config_player.xml.")
-                return
-
-            regularpackages.childrens.clear()
+            pkgs = list(xml_obj.find_only_elements("regularpackages"))
+            if not pkgs: return
+            reg_pkg = pkgs[0]
+            
+            reg_pkg.childrens.clear()
 
             for mod in ModManager.active_mods:
                 try:
-                    mod_path = mod.get_str_path()
-                    regularpackages.add_child(XMLComment(mod.name))
-                    regularpackages.add_child(
+                    mod_path = mod.str_path
+                    reg_pkg.add_child(XMLComment(mod.name))
+                    reg_pkg.add_child(
                         XMLElement("package", {"path": f"{mod_path}/filelist.xml"})
                     )
 
@@ -344,181 +345,234 @@ class ModManager:
                         try:
                             PartsManager.rollback_changes_no_thread(mod)
                         except Exception as e:
-                            logger.error(
-                                f"Error rolling back changes for mod {mod.name}: {e}"
-                            )
+                            logger.error(f"Error rolling back changes for mod {mod.name}: {e}")
                 except Exception as e:
-                    logger.error(f"Error processing mod {mod.name}: {e}")
-                    continue
+                    logger.error(f"Error processing mod {mod.name} on exit: {e}")
 
-            XMLBuilder.save(xml_obj, user_config_path)
+            tmp = user_config_path.with_suffix('.tmp')
+            XMLBuilder.save(xml_obj, tmp)
+            if tmp.exists():
+                tmp.replace(user_config_path)
 
         except Exception as e:
             logger.error(f"Error during exit processing: {e}")
 
     @staticmethod
     def process_errors():
-        active_mods_ids = {mod.id for mod in ModManager.active_mods}
+        active_ids = {mod.id for mod in ModManager.active_mods}
+        
         bind_id = {}
-        for mod in ModManager.active_mods:
-            mod.update_meta_errors()
-            for dep in mod.metadata.dependencies:
-                if dep.type == "conflict":
-                    if dep.id in active_mods_ids:
-                        level = dep.attributes.get("level", "error")
-                        if level == "warning":
-                            mod.metadata.warnings.append(
-                                dep.attributes.get("message", "base-conflict")
-                            )
-                        else:
-                            mod.metadata.errors.append(
-                                dep.attributes.get("message", "base-conflict")
-                            )
-
-                elif dep.condition:
-                    if process_condition(
-                        dep.condition, active_mods_ids=active_mods_ids
-                    ):
-                        if dep.id not in active_mods_ids:
-                            mod.metadata.errors.append(
-                                loc.get_string(
-                                    "mod-unfind-mod",
-                                    mod_name=dep.name,
-                                    mod_id=dep.steam_id,
-                                )
-                            )
-                else:
-                    if dep.id not in active_mods_ids:
-                        mod.metadata.errors.append(
-                            loc.get_string(
-                                "mod-unfind-mod",
-                                mod_name=dep.name,
-                                mod_id=dep.steam_id,
-                            )
-                        )
-
         for mod in ModManager.active_mods:
             for over_id in mod.override_id:
                 if over_id not in bind_id:
                     bind_id[over_id] = (mod.name, mod.id)
 
         for mod in ModManager.active_mods:
-            for over_id in mod.override_id:
-                if over_id in bind_id:
-                    mod.metadata.warnings.append(
-                        loc.get_string(
-                            "mod-override-id",
-                            mod_name=bind_id[over_id][0],
-                            mod_id=bind_id[over_id][1],
-                            key_id=over_id,
+            mod.update_meta_errors()
+            
+            meta = mod.metadata
+            deps = meta.dependencies
+            
+            for dep in deps:
+                if dep.type == "conflict":
+                    if dep.id in active_ids:
+                        level = dep.attributes.get("level", "error")
+                        msg = dep.attributes.get("message", "base-conflict")
+                        if level == "warning":
+                            meta.warnings.append(msg)
+                        else:
+                            meta.errors.append(msg)
+
+                elif dep.type == "requiredAnyOrder":
+                     pass
+                
+                else:
+                    is_missing = dep.id not in active_ids
+                    
+                    if dep.condition:
+                        if process_condition(dep.condition, active_mods_ids=active_ids):
+                            if is_missing:
+                                meta.errors.append(loc.get_string("mod-unfind-mod", mod_name=dep.name, mod_id=dep.steam_id))
+                    elif is_missing:
+                         meta.errors.append(loc.get_string("mod-unfind-mod", mod_name=dep.name, mod_id=dep.steam_id))
+
+            if mod.override_id:
+                for over_id in mod.override_id:
+                    if over_id in bind_id and bind_id[over_id][1] != mod.id:
+                        meta.warnings.append(
+                            loc.get_string(
+                                "mod-override-id",
+                                mod_name=bind_id[over_id][0],
+                                mod_id=bind_id[over_id][1],
+                                key_id=over_id,
+                            )
                         )
-                    )
 
     @staticmethod
     def sort():
         mods = ModManager.active_mods
-        id_to_mod = {mod.id: mod for mod in mods}
-        id_to_name = {mod.id: mod.name for mod in mods}
-        active_mod_ids = set(id_to_mod.keys())
-        ban_ids = set()
-
-        dependency_graph = defaultdict(list)
-        in_degree = defaultdict(int)
-        added_ids = {}
-
-        for mod in mods:
-            for dep in mod.metadata.dependencies:
-                if dep.condition and not process_condition(
-                    dep.condition, active_mod_ids=active_mod_ids
-                ):
-                    continue
-
-                dep_id = dep.id
-
-                if dep.type == "conflict":
-                    if dep_id in id_to_mod:
-                        ban_ids.add(dep_id)
-                        logger.error(
-                            f"Conflict detected between '{mod.name}' and '{id_to_name.get(dep_id, dep_id)}'."
-                        )
-                    continue
-
-                if dep_id not in id_to_mod:
-                    if not ModManager.activate_mod(dep_id):
-                        logger.warning(
-                            f"Dependency '{dep_id}' specified in mod '{mod.name}' not found among active mods."
-                        )
-                        continue
-                    else:
-                        if dep_id in ban_ids:
-                            logger.error(
-                                f"Conflict detected between '{mod.name}' and '{id_to_name.get(dep_id, dep_id)}'."
-                            )
-                            continue
-
-                        on_mod = ModManager.get_mod_by_id(dep_id)
-                        id_to_mod[on_mod.id] = on_mod  # type: ignore
-                        id_to_name[on_mod.id] = on_mod.name  # type: ignore
-                        active_mod_ids.add(on_mod.id)  # type: ignore
-
-                if dep.type == "patch":
-                    dependency_graph[mod.id].append(dep_id)
-                    in_degree[dep_id] += 1
-
-                elif dep.type == "requirement":
-                    dependency_graph[dep_id].append(mod.id)
-                    in_degree[mod.id] += 1
-
-                elif dep.type == "requiredAnyOrder":
-                    pass
-
-        for mod in mods:
-            for add_id in mod.add_id:
-                if add_id in added_ids:
-                    logger.warning(
-                        f"Conflict: add_id '{add_id}' already added by '{id_to_name[added_ids[add_id]]}' but '{mod.name}' try add one more time"
-                    )
-                else:
-                    added_ids[add_id] = mod.id
-
-        for mod in mods:
-            if not mod.get_bool_settigs("IgnoreOverrideCheck"):
-                for override_id in mod.override_id:
-                    if override_id in added_ids:
-                        adder_mod_id = added_ids[override_id]
-                        if adder_mod_id != mod.id:
-                            dependency_graph[adder_mod_id].append(mod.id)
-                            in_degree[mod.id] += 1
-
-        queue = deque(
-            sorted(
-                [mod_id for mod_id in id_to_mod if in_degree[mod_id] == 0],
-                key=lambda id: id_to_name[id],
-            )
-        )
-
-        sorted_mods: List[ModUnit] = []
-        while queue:
-            current_id = queue.popleft()
-            current_mod = id_to_mod[current_id]
-            sorted_mods.append(current_mod)
-
-            for neighbor_id in sorted(
-                dependency_graph[current_id], key=lambda id_: id_to_name[id_]
-            ):
-                in_degree[neighbor_id] -= 1
-                if in_degree[neighbor_id] == 0:
-                    queue.append(neighbor_id)
-
-        if len(sorted_mods) != len(mods):
-            unresolved_mods = set(id_to_mod.keys()) - set(mod.id for mod in sorted_mods)
-            unresolved_names = [id_to_name[mod_id] for mod_id in unresolved_mods]
-            logger.error(
-                f"Unresolved dependencies or cycles detected for mods: {', '.join(unresolved_names)}"
-            )
+        if not mods:
             return
+
+        logger.info(f"Starting sort for {len(mods)} active mods")
+
+        id_to_mod = ModManager._mod_map 
+        id_to_name = {m.id: m.name for m in mods}
+        active_mod_map = {m.id: m for m in mods}
+        active_mod_ids = set(active_mod_map.keys())
+        
+        ban_ids = set()
+        dependencies = defaultdict(set)
+        hard_edges = set()
+        
+        missing_dependencies = []
+
+        for mod in mods:
+            mod_deps = mod.metadata.dependencies
+            for dep in mod_deps:
+                if dep.type == "conflict":
+                    if dep.id in active_mod_ids:
+                        ban_ids.add(dep.id)
+                        logger.error(f"Conflict: '{mod.name}' <-> '{id_to_name.get(dep.id, dep.id)}'.")
+                
+                elif dep.type in ("requirement", "patch"):
+
+                    if dep.condition and not process_condition(dep.condition, active_mod_ids=active_mod_ids):
+                        continue
+                    
+                    if dep.id not in active_mod_ids and dep.id not in ban_ids:
+                        candidate = ModManager.get_mod_by_id(dep.id)
+                        if candidate:
+                             missing_dependencies.append(candidate)
+                        else:
+
+                            pass
+
+        if missing_dependencies:
+            for new_mod in missing_dependencies:
+                if new_mod.id not in active_mod_ids and new_mod.id not in ban_ids:
+                    if ModManager.activate_mod(new_mod.id):
+                        active_mod_map[new_mod.id] = new_mod
+                        active_mod_ids.add(new_mod.id)
+                        id_to_name[new_mod.id] = new_mod.name
+                        logger.info(f"Auto-activated: '{new_mod.name}'")
+  
+            mods = ModManager.active_mods
+
+        added_ids = {}
+        for mod in mods:
+            for aid in mod.add_id:
+                if aid not in added_ids:
+                    added_ids[aid] = mod.id
+
+        for mod in mods:
+            mod_id = mod.id
+            mod_name_lower = mod.name.lower()
+            
+            for dep in mod.metadata.dependencies:
+                if dep.id not in active_mod_ids: continue
+                if dep.type == "conflict": continue
+                if dep.condition and not process_condition(dep.condition, active_mod_ids=active_mod_ids): continue
+
+                target_id = dep.id
+                if dep.type == "patch" or dep.type == "requirement":
+                    dependencies[mod_id].add(target_id)
+                    hard_edges.add((mod_id, target_id))
+
+            is_potential_patch = any(k in mod_name_lower for k in ('patch', 'compatibility', 'compat'))
+            if is_potential_patch:
+                for other_mod in mods:
+                    if other_mod.id == mod_id: continue
+                    other_name = other_mod.name.lower()
+                    if len(other_name) > 3 and other_name in mod_name_lower:
+                        dependencies[mod_id].add(other_mod.id)
+
+            if not mod.get_bool_setting("IgnoreOverrideCheck"):
+                for oid in mod.override_id:
+                    if oid in added_ids:
+                        adder_id = added_ids[oid]
+                        if adder_id != mod_id:
+                            dependencies[mod_id].add(adder_id)
+
+        
+        in_degree = defaultdict(int)
+        for u, parents in dependencies.items():
+            in_degree[u] = len(parents)
+
+        children_graph = defaultdict(list)
+        for child, parents in dependencies.items():
+            for parent in parents:
+                children_graph[parent].append(child)
+
+        current_order = {m.id: i for i, m in enumerate(mods)}
+        queue = []
+        for mod in mods:
+            if in_degree[mod.id] == 0:
+                queue.append(mod.id)
+        queue.sort(key=lambda x: current_order.get(x, 0))
+        queue = deque(queue)
+
+        sorted_mods = []
+        processed_ids = set()
+
+        def process_queue():
+            while queue:
+                u = queue.popleft()
+                if u in processed_ids or u not in active_mod_map:
+                    continue
+                
+                sorted_mods.append(active_mod_map[u])
+                processed_ids.add(u)
+                
+                if u in children_graph:
+                    for v in children_graph[u]:
+                        in_degree[v] -= 1
+                        if in_degree[v] == 0:
+                            queue.append(v)
+
+        process_queue()
+        
+        if len(sorted_mods) != len(mods):
+            unresolved = set(active_mod_ids) - processed_ids
+            logger.warning(f"Cycle detected! Unresolved mods: {len(unresolved)}")
+
+            has_soft_resolves = True
+            while has_soft_resolves and len(sorted_mods) != len(mods):
+                has_soft_resolves = False
+                unresolved = set(active_mod_ids) - processed_ids
+                
+                for u in list(unresolved):
+                    holders = [p for p in dependencies[u] if p in unresolved]
+                    for p in holders:
+                        if (u, p) not in hard_edges:
+                            in_degree[u] -= 1
+                            dependencies[u].remove(p)
+                            logger.info(f"Resolving cycle (soft): '{id_to_name[u]}' -> '{id_to_name[p]}'")
+                            
+                            if in_degree[u] == 0:
+                                queue.append(u)
+                                has_soft_resolves = True
+                
+                if has_soft_resolves:
+                    process_queue()
+
+            while len(sorted_mods) != len(mods):
+                unresolved = set(active_mod_ids) - processed_ids
+                if not unresolved: break
+
+                best_mod_id = min(
+                    unresolved,
+                    key=lambda mid: len([p for p in dependencies[mid] if p in unresolved])
+                )
+                
+                queue.append(best_mod_id)
+                in_degree[best_mod_id] = 0 
+                process_queue()
 
         for i, mod in enumerate(sorted_mods, 1):
             mod.load_order = i
-
+        
         ModManager.active_mods = sorted_mods
+        logger.info(f"Sorted {len(sorted_mods)} mods")
+        
+        ModManager.process_errors()
