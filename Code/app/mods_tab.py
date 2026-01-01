@@ -378,47 +378,62 @@ class ModsTab:
 
     @staticmethod
     def on_mod_dropped(sender, app_data, user_data):
-        drag_data = app_data
-        if not isinstance(drag_data, dict):
-            return
+        try:
+            drag_data = app_data
+            if not isinstance(drag_data, dict):
+                return
+            
+            drag_id = drag_data.get("mod_id")
+            drag_status = drag_data.get("status")
 
-        drag_id = drag_data.get("mod_id")
-        drag_status = drag_data.get("status")
+            target_status = None
+            target_id = None
+            is_container_drop = False
 
-        target_status = None
-        target_id = None
-        is_container_drop = False
-
-        if isinstance(user_data, dict) and "mod_id" in user_data:
-            target_status = user_data.get("status")
-            target_id = user_data.get("mod_id")
-        
-        elif isinstance(user_data, str):
-            target_status = user_data
-            is_container_drop = True
-
-        if not target_status or not drag_id:
-            return
-
-        if drag_status != target_status:
-            if target_status == "active":
-                ModManager.activate_mod(drag_id)
+            if sender == ModsTab.TAG_ACTIVE_LIST:
+                target_status = "active"
+                is_container_drop = True
+            elif sender == ModsTab.TAG_INACTIVE_LIST:
+                target_status = "inactive"
+                is_container_drop = True
             else:
-                ModManager.deactivate_mod(drag_id)
-            drag_status = target_status
+                if isinstance(user_data, dict):
+                    target_status = user_data.get("status")
+                    target_id = user_data.get("mod_id")
+                else:
+                    target_data = dpg.get_item_user_data(sender)
+                    if isinstance(target_data, dict):
+                        target_status = target_data.get("status")
+                        target_id = target_data.get("mod_id")
 
-        if drag_status == "active":
-            if target_id and target_id != drag_id:
-                ModManager.swap_active_mods(drag_id, target_id)
-            elif is_container_drop:
-                ModManager.move_active_mod_to_end(drag_id)
-        else:
-            if target_id and target_id != drag_id:
-                ModManager.swap_inactive_mods(drag_id, target_id)
-            elif is_container_drop:
-                ModManager.move_inactive_mod_to_end(drag_id)
+            if not target_status:
+                return
 
-        ModsTab.render_mods()
+            if not is_container_drop and drag_id == target_id:
+                return
+
+            if drag_status != target_status:
+                if target_status == "active":
+                    ModManager.activate_mod(drag_id)
+                else:
+                    ModManager.deactivate_mod(drag_id)
+                drag_status = target_status
+
+            if drag_status == "active":
+                if is_container_drop:
+                    ModManager.move_active_mod_to_end(drag_id)
+                elif target_id and target_id != drag_id:
+                    ModManager.swap_active_mods(drag_id, target_id)
+            
+            elif drag_status == "inactive":
+                if is_container_drop:
+                    ModManager.move_inactive_mod_to_end(drag_id)
+                elif target_id and target_id != drag_id:
+                    ModManager.swap_inactive_mods(drag_id, target_id)
+            ModsTab.render_mods()
+
+        except Exception as e:
+            logger.error(f"Error in Drag&Drop: {e}", exc_info=True)
 
     @staticmethod
     def count_mods_with_issues() -> Tuple[int, int]:
