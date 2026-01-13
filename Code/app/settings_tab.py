@@ -11,6 +11,8 @@ from Code.handlers import ModManager
 from Code.loc import Localization as loc
 
 from .mods_tab import ModsTab
+from Code.app.theme_manager import ThemeManager
+from Code.app.ui_utils import UIColors
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ class SettingsTab:
         ):
             dpg.add_text(
                 loc.get_string("label-barotrauma-path-settings"),
-                color=(200, 200, 250),
+                color=UIColors.VALUE,
                 wrap=0,
             )
 
@@ -38,20 +40,20 @@ class SettingsTab:
 
             with dpg.group(horizontal=True):
                 dpg.add_text(
-                    loc.get_string("label-current-path"), color=(100, 150, 250)
+                    loc.get_string("label-current-path"), color=UIColors.LABEL
                 )
                 dpg.add_text(
                     AppConfig.get("barotrauma_dir", loc.get_string("base-not-set")),  # type: ignore
                     tag="barotrauma_cur_path_text",
-                    color=(200, 200, 250),
+                    color=UIColors.VALUE,
                 )
 
             with dpg.group(horizontal=True):
-                dpg.add_text(loc.get_string("label-valid-path"), color=(100, 150, 250))
+                dpg.add_text(loc.get_string("label-valid-path"), color=UIColors.LABEL)
                 dpg.add_text(
                     loc.get_string("label-not-defined"),
                     tag="barotrauma_cur_path_valid",
-                    color=(255, 0, 0),
+                    color=UIColors.ERROR,
                 )
 
             dpg.add_separator()
@@ -63,7 +65,7 @@ class SettingsTab:
             dpg.add_separator()
             dpg.add_text(
                 loc.get_string("label-workshop-sync-path"),
-                color=(200, 200, 250),
+                color=UIColors.VALUE,
                 wrap=0,
             )
             
@@ -79,7 +81,7 @@ class SettingsTab:
 
             dpg.add_text(
                 loc.get_string("settings-app-checkboxs"),
-                color=(200, 200, 250),
+                color=UIColors.VALUE,
                 wrap=0,
             )
             with dpg.group(horizontal=True):
@@ -111,7 +113,7 @@ class SettingsTab:
 
             dpg.add_text(
                 loc.get_string("settings-app-visual"),
-                color=(200, 200, 250),
+                color=UIColors.VALUE,
                 wrap=0,
             )
             loc_dict = {
@@ -127,7 +129,22 @@ class SettingsTab:
                 callback=lambda s, a: cls._on_language_changed(a, loc_dict),
                 tag="language_selector",
             )
+            
+            # --- Theme Selector ---
+            dpg.add_text("Theme:", color=UIColors.VALUE)
+            dpg.add_combo(
+                items=ThemeManager.get_themes(),
+                default_value=AppConfig.get("app_theme", "Dark"),
+                callback=lambda s, a: cls._apply_theme_and_rebuild(a),
+                width=200
+            )
         dpg_tools.rc_windows()
+
+    @staticmethod
+    def _apply_theme_and_rebuild(theme_name: str) -> None:
+        ThemeManager.apply_theme(theme_name)
+        from Code.app.app_interface import AppInterface
+        AppInterface.rebuild_interface()
 
     @staticmethod
     def _on_language_changed(
@@ -152,7 +169,7 @@ class SettingsTab:
             if path.exists() and (path / "config_player.xml").exists():
                 if dpg.does_item_exist("barotrauma_cur_path_valid"):
                     dpg.set_value("barotrauma_cur_path_valid", "True")
-                    dpg.configure_item("barotrauma_cur_path_valid", color=[0, 255, 0])
+                    dpg.configure_item("barotrauma_cur_path_valid", color=UIColors.SUCCESS)
 
                 AppConfig.set("barotrauma_dir", str(path))
                 AppConfig.set_steam_mods_path()
@@ -181,7 +198,7 @@ class SettingsTab:
             )
             dpg.configure_item(
                 "cs_scripting_status",
-                color=[0, 255, 0] if has_cs else [255, 0, 0],
+                color=UIColors.SUCCESS if has_cs else UIColors.ERROR,
             )
 
             dpg.set_value(
@@ -189,7 +206,7 @@ class SettingsTab:
                 loc.get_string("base-yes") if has_lua else loc.get_string("base-no"),
             )
             dpg.configure_item(
-                "lua_status", color=[0, 255, 0] if has_lua else [255, 0, 0]
+                "lua_status", color=UIColors.SUCCESS if has_lua else UIColors.ERROR
             )
 
             dpg.set_value("barotrauma_cur_path_text", path)
@@ -199,7 +216,7 @@ class SettingsTab:
 
         if dpg.does_item_exist("barotrauma_cur_path_valid"):
             dpg.set_value("barotrauma_cur_path_valid", "False")
-            dpg.configure_item("barotrauma_cur_path_valid", color=[255, 0, 0])
+            dpg.configure_item("barotrauma_cur_path_valid", color=UIColors.ERROR)
         logger.error("Path validation failed and marked as invalid.")
 
     @classmethod

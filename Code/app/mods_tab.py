@@ -13,20 +13,10 @@ from Code.app_vars import AppConfig
 from Code.handlers import ModManager
 from Code.loc import Localization as loc
 from Code.package import ModUnit
+from Code.app.ui_utils import UIColors
 
 logger = logging.getLogger(__name__)
 
-
-class UIColors:
-    AUTHOR = (0, 102, 204)
-    LICENSE = (169, 169, 169)
-    VERSION = (34, 139, 34)
-    ERROR = (255, 70, 70)
-    WARNING = (255, 255, 100)
-    DEFAULT = (255, 255, 255)
-    LABEL = (100, 150, 250)
-    VALUE = (200, 200, 250)
-    SUCCESS = (50, 205, 50)
 
 
 class ModsTab:
@@ -129,6 +119,11 @@ class ModsTab:
                             border=True
                         ):
                             pass
+
+        # Create Item Handler Registry for Double Click
+        if not dpg.does_item_exist("mod_double_click_handler"):
+            with dpg.item_handler_registry(tag="mod_double_click_handler"):
+                dpg.add_item_double_clicked_handler(callback=ModsTab.on_mod_double_clicked)
 
         ModsTab.render_mods()
 
@@ -301,6 +296,7 @@ class ModsTab:
                 payload_type="MOD_DRAG",
                 user_data={"mod_id": mod.id, "status": status},
             )
+            dpg.bind_item_handler_registry(text_item, "mod_double_click_handler")
             with dpg.drag_payload(parent=text_item, payload_type="MOD_DRAG", drag_data={"mod_id": mod.id, "status": status}):
                 dpg.add_text(f"{mod.name} ({status})")
             with dpg.tooltip(parent=text_item):
@@ -423,17 +419,42 @@ class ModsTab:
                 if is_container_drop:
                     ModManager.move_active_mod_to_end(drag_id)
                 elif target_id and target_id != drag_id:
-                    ModManager.swap_active_mods(drag_id, target_id)
+                    ModManager.insert_active_mod(drag_id, target_id)
             
             elif drag_status == "inactive":
                 if is_container_drop:
                     ModManager.move_inactive_mod_to_end(drag_id)
                 elif target_id and target_id != drag_id:
-                    ModManager.swap_inactive_mods(drag_id, target_id)
+                    ModManager.insert_inactive_mod(drag_id, target_id)
             ModsTab.render_mods()
 
         except Exception as e:
             logger.error(f"Error in Drag&Drop: {e}", exc_info=True)
+
+    @staticmethod
+    def on_mod_double_clicked(sender, app_data, user_data):
+        # sender is the handler, app_data is (item, button) usually, 
+        # but for double_click handler: app_data is (clicked_item_tag, mouse_button)
+        # Verify DPG version behavior or inspect arguments.
+        # Usually: app_data[1] is the item tag that was clicked.
+        
+        try:
+            target_item = app_data[1]
+            data = dpg.get_item_user_data(target_item)
+            
+            if not isinstance(data, dict): return
+            
+            mod_id = data.get("mod_id")
+            current_status = data.get("status")
+            
+            if current_status == "active":
+                ModManager.deactivate_mod(mod_id)
+            else:
+                ModManager.activate_mod(mod_id)
+                
+            ModsTab.render_mods()
+        except Exception as e:
+            logger.error(f"Double click error: {e}")
 
     @staticmethod
     def count_mods_with_issues() -> Tuple[int, int]:

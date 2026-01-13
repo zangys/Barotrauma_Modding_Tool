@@ -1,0 +1,11 @@
+tab-conflicts = Konflikte
+btn-scan-conflicts = Konflikte scannen
+label-filter = Filter
+col-identifier = Identifier / Datei
+col-status = Status
+col-overridden-by = Überschrieben von (Aktive Mods)
+status-scanning = Scanning...
+status-conflict = Konflikt
+status-override = Überschreibung
+status-found-conflicts = {count} Konflikte gefunden!
+status-no-conflicts = Keine Identifikatoren verarbeitet oder nur einzelne Überschreibungen gefunden.

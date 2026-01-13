@@ -1,0 +1,14 @@
+tab-user-rules = Правила Сортировки
+header-add-rule = Добавить Правило
+label-load-before = ...загружается ПЕРЕД...
+label-mod-subject = Первый Мод (Субъект)
+label-mod-target = Второй Мод (Цель)
+btn-add-rule = Добавить Правило
+header-current-rules = Текущие Правила
+btn-remove-rule = Удалить
+msg-rule-added = Правило добавлено: '{subject}' -> '{target}'
+error-adding-rule = Ошибка добавления: {error}
+confirm-delete-rule = Правило удалено.
+column-rule = Правило
+column-actions = Действия
+combo-search = Поиск мода...

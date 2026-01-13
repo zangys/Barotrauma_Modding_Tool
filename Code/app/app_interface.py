@@ -8,12 +8,18 @@ import requests
 
 import Code.dpg_tools as dpg_tools
 from Code.app_vars import AppConfig
+from Code.app.conflicts_tab import ConflictsTab
+from Code.app.rules_tab import RulesTab
+from Code.app.auto_updater import AutoUpdater
 from Code.game import Game
 from Code.handlers import ModManager
+from Code.handlers.user_rules import UserRulesManager
+from Code.app.theme_manager import ThemeManager
 from Code.loc import Localization as loc
 
 from .mods_tab import ModsTab
 from .settings_tab import SettingsTab
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +31,16 @@ class AppInterface:
     def initialize():
         AppInterface._create_viewport_menu_bar()
         AppInterface._create_main_window()
+        
+        ModManager.load_mods()
+        UserRulesManager.init()
+        ThemeManager.init()
+        AutoUpdater.init()
+
         SettingsTab.create()
         ModsTab.create()
+        ConflictsTab.create()
+        RulesTab.create()
 
         # Устанавливаем активную вкладку
         if dpg.does_item_exist("mod_tab"):
@@ -87,25 +101,15 @@ class AppInterface:
 
     @staticmethod
     def _async_check_version():
-        is_latest = None
-        repo_api_url = "https://api.github.com/repos/zangys/Barotrauma_Modding_Tool_Enchanted/releases/latest"
-        
-        try:
-            response = requests.get(repo_api_url, timeout=10)
-            if response.status_code == 200:
-                latest_data = response.json()
-                latest_tag = latest_data.get("tag_name", "")
-                is_latest = AppConfig.version == latest_tag
-            else:
-                logger.warning(f"GitHub API Error: {response.status_code}")
-        except Exception as e:
-            logger.error(f"Version check failed: {e}")
+        """Асинхронно проверяет версию через AutoUpdater."""
+        update_info = AutoUpdater.check_for_updates()
+        is_latest = update_info is None  # None означает что уже на последней версии
 
-        AppInterface._update_version_ui(is_latest)
+        AppInterface._update_version_ui(is_latest, update_info)
 
     @staticmethod
-    def _update_version_ui(is_latest: bool | None):
-        """Обновляет пункт меню с версией."""
+    def _update_version_ui(is_latest: bool | None, update_info: dict | None = None):
+        """Обновляет пункт меню с версией и показывает диалог обновления."""
         if is_latest is True:
             status = loc.get_string("base-yes")
             should_enable = False 
@@ -118,12 +122,21 @@ class AppInterface:
 
         new_label = f"{loc.get_string('cur-version-latest')} {status}"
         
-        # ИСПРАВЛЕНИЕ 2: Убран аргумент color, так как menu_item его не поддерживает в configure_item
         if dpg.does_item_exist(AppInterface.TAG_VERSION_ITEM):
+            # Меняем callback на показ диалога обновления
+            def show_update_or_github():
+                if AutoUpdater.is_update_available():
+                    AutoUpdater.show_update_dialog()
+                else:
+                    webbrowser.open(
+                        "https://github.com/zangys/Barotrauma_Modding_Tool_Enchanted/releases/latest"
+                    )
+
             dpg.configure_item(
                 AppInterface.TAG_VERSION_ITEM, 
                 label=new_label, 
-                enabled=should_enable
+                enabled=should_enable,
+                callback=show_update_or_github,
             )
 
     @staticmethod
@@ -272,6 +285,8 @@ class AppInterface:
         AppInterface._create_viewport_menu_bar()
         SettingsTab.create()
         ModsTab.create()
+        ConflictsTab.create()
+        RulesTab.create() # Added as per instruction
 
         if current_tab:
             dpg.set_value("main_tab_bar", current_tab)

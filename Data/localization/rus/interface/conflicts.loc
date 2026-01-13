@@ -1,0 +1,11 @@
+tab-conflicts = Конфликты
+btn-scan-conflicts = Сканировать
+label-filter = Фильтр
+col-identifier = Идентификатор / Файл
+col-status = Статус
+col-overridden-by = Переопределен (Активные моды)
+status-scanning = Сканирование...
+status-conflict = КОНФЛИКТ
+status-override = Переопределение
+status-found-conflicts = Найдено конфликтов: {count}!
+status-no-conflicts = Конфликтов не найдено.

@@ -1,0 +1,12 @@
+# Строки автообновления
+update-available=Доступно обновление
+update-new-version=Доступна новая версия
+update-downloading=Загрузка обновления...
+update-installing=Установка обновления...
+update-restart-required=Требуется перезапуск для применения обновления
+update-download-button=Скачать и установить
+update-open-github=Открыть GitHub
+update-later-button=Позже
+update-download-complete=Загрузка завершена! Откройте папку для установки.
+update-download-failed=Загрузка не удалась. Попробуйте снова.
+update-error-no-url=Ошибка: Нет загрузки для вашей платформы

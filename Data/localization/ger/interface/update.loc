@@ -1,0 +1,12 @@
+# Auto-Update-Strings
+update-available=Update verfügbar
+update-new-version=Neue Version verfügbar
+update-downloading=Update wird heruntergeladen...
+update-installing=Update wird installiert...
+update-restart-required=Neustart erforderlich
+update-download-button=Herunterladen & Installieren
+update-open-github=GitHub öffnen
+update-later-button=Später
+update-download-complete=Download abgeschlossen! Ordner öffnen zum Installieren.
+update-download-failed=Download fehlgeschlagen. Bitte versuchen Sie es erneut.
+update-error-no-url=Fehler: Kein Download für Ihre Plattform verfügbar

@@ -1,30 +1,54 @@
-name: Manual Build
+name: Build & Release
 
 on:
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create GitHub Release'
+        required: false
+        default: false
+        type: boolean
   
+  push:
+    tags:
+      - 'v*'
+
+env:
+  PYTHON_VERSION: '3.12'
+  APP_NAME: 'BMTE'
+
 jobs:
   build:
+    name: Build (${{ matrix.os_name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            os_name: Linux
             asset_name: BMTE-linux-64bit
             separator: ":"
+            executable_ext: ""
           - os: windows-latest
+            os_name: Windows
             asset_name: BMTE-windows-64bit
             separator: ";"
+            executable_ext: ".exe"
+          - os: macos-latest
+            os_name: macOS
+            asset_name: BMTE-macos-64bit
+            separator: ":"
+            executable_ext: ""
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install dependencies
@@ -33,25 +57,97 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
 
+      - name: Get version from app_vars.py
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -oP 'version.*=.*"\K[^"]+' Code/app_vars.py || echo "unknown")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
           pyinstaller main.py `
             --noconsole `
-            --name BMTE `
-            --add-data "Data${{ matrix.separator }}Data"
+            --onedir `
+            --name ${{ env.APP_NAME }} `
+            --add-data "Data${{ matrix.separator }}Data" `
+            --clean
 
-      - name: Build with PyInstaller (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Build with PyInstaller (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           pyinstaller main.py \
             --noconsole \
-            --name BMTE \
-            --add-data "Data${{ matrix.separator }}Data"
+            --onedir \
+            --name ${{ env.APP_NAME }} \
+            --add-data "Data${{ matrix.separator }}Data" \
+            --clean
+
+      - name: Create ZIP archive
+        shell: bash
+        run: |
+          cd dist
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            7z a -tzip ../${{ matrix.asset_name }}.zip ${{ env.APP_NAME }}/
+          else
+            zip -r ../${{ matrix.asset_name }}.zip ${{ env.APP_NAME }}/
+          fi
+          cd ..
+          ls -la *.zip
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: dist/BMTE/
+          path: ${{ matrix.asset_name }}.zip
           retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+    
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION=$(grep -oP 'version.*=.*"\K[^"]+' Code/app_vars.py || echo "dev")
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -name "*.zip"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "Release ${{ steps.version.outputs.version }}"
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

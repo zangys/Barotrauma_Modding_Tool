@@ -8,9 +8,10 @@ from typing import Dict, List, Optional, Set, Tuple
 from datetime import datetime
 from Code.app_vars import AppConfig
 from Code.loc import Localization as loc
-from Code.package.dataclasses import ModUnit
+from Code.package.dataclasses import Dependency, Identifier, ModUnit
 from Code.xml_object import XMLBuilder, XMLComment, XMLElement
-from .cache_manager import CacheManager
+from Code.handlers.cache_manager import CacheManager
+from Code.handlers.user_rules import UserRulesManager
 from .condition_manager import process_condition
 from .parts_manager import PartsManager
 
@@ -401,6 +402,42 @@ class ModManager:
             pass
 
     @staticmethod
+    def insert_active_mod(mod_id: str, target_mod_id: str) -> None:
+        """Moves mod_id to be inserted immediately before target_mod_id."""
+        try:
+            mod = ModManager.get_mod_by_id(mod_id)
+            target = ModManager.get_mod_by_id(target_mod_id)
+            
+            if not mod or not target: return
+            if mod not in ModManager.active_mods or target not in ModManager.active_mods: return
+            if mod == target: return
+
+            ModManager.active_mods.remove(mod)
+            target_index = ModManager.active_mods.index(target)
+            ModManager.active_mods.insert(target_index, mod)
+            
+        except ValueError:
+            pass
+
+    @staticmethod
+    def insert_inactive_mod(mod_id: str, target_mod_id: str) -> None:
+        """Moves mod_id to be inserted immediately before target_mod_id."""
+        try:
+            mod = ModManager.get_mod_by_id(mod_id)
+            target = ModManager.get_mod_by_id(target_mod_id)
+            
+            if not mod or not target: return
+            if mod not in ModManager.inactive_mods or target not in ModManager.inactive_mods: return
+            if mod == target: return
+
+            ModManager.inactive_mods.remove(mod)
+            target_index = ModManager.inactive_mods.index(target)
+            ModManager.inactive_mods.insert(target_index, mod)
+            
+        except ValueError:
+            pass
+
+    @staticmethod
     def move_active_mod_to_end(mod_id: str) -> None:
         mod = ModManager.get_mod_by_id(mod_id)
         if mod and mod in ModManager.active_mods:
@@ -571,6 +608,10 @@ class ModManager:
             return
 
         logger.info(f"Starting sort for {len(mods)} active mods")
+        
+        # Initialize/Load User Rules
+        UserRulesManager.init()
+        user_rules = UserRulesManager.get_rules()
 
         id_to_mod = ModManager._mod_map 
         id_to_name = {m.id: m.name for m in mods}
@@ -649,6 +690,18 @@ class ModManager:
                         adder_id = added_ids[oid]
                         if adder_id != mod_id:
                             dependencies[mod_id].add(adder_id)
+                            
+        # Apply User Rules (Hard Edges)
+        # Rule: Subject loads before Target -> Target depends on Subject
+        for rule in user_rules:
+            subject = rule["subject"]
+            target = rule["target"]
+            
+            # key: "load_before"
+            if subject in active_mod_ids and target in active_mod_ids:
+                dependencies[target].add(subject)
+                hard_edges.add((target, subject))
+                logger.debug(f"Applied user rule: '{id_to_name.get(subject, subject)}' -> '{id_to_name.get(target, target)}'")
 
         
         in_degree = defaultdict(int)

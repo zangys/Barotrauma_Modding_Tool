@@ -1,0 +1,14 @@
+tab-user-rules = Sorting Rules
+header-add-rule = Add Sorting Rule
+label-load-before = ...loads BEFORE...
+label-mod-subject = First Mod (Subject)
+label-mod-target = Second Mod (Target)
+btn-add-rule = Add Rule
+header-current-rules = Current Rules
+btn-remove-rule = Remove
+msg-rule-added = Rule added: '{subject}' -> '{target}'
+error-adding-rule = Failed to add rule: {error}
+confirm-delete-rule = Removed rule.
+column-rule = Rule
+column-actions = Actions
+combo-search = Search mod...
