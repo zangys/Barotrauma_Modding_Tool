@@ -151,11 +151,36 @@ class Game:
                 if Path(f"{drive}:\\").exists() and os.access(f"{drive}:\\", os.R_OK)
             ]
         else:
+            # Basic mount points
             drives = [
                 Path(mount_point)
                 for mount_point in Path("/mnt").glob("*")
                 if mount_point.is_dir()
             ]
+            drives.extend([
+                Path(mount_point)
+                for mount_point in Path("/media").glob("*") 
+                if mount_point.is_dir()
+            ])
+            # Check /run/media/USER/*
+            run_media = Path("/run/media")
+            if run_media.exists():
+                for user_dir in run_media.iterdir():
+                     if user_dir.is_dir():
+                         drives.extend([p for p in user_dir.iterdir() if p.is_dir()])
+
+            # Add Home Directory
+            drives.append(Path.home())
+            
+            # Common Steam Paths on Linux
+            steam_paths = [
+                Path.home() / ".steam",
+                Path.home() / ".local/share/Steam",
+                Path.home() / ".var/app/com.valvesoftware.Steam/.local/share/Steam", # Flatpak
+            ]
+            for sp in steam_paths:
+                if sp.exists():
+                    drives.append(sp)
 
         logger.debug(f"Found drives: {len(drives)}")
 
@@ -260,6 +285,9 @@ class Game:
                 Path("/lost+found"),
                 Path("/snap"),
                 Path("/srv"),
+                Path("/root"),
+                Path("/mnt"),
+                Path("/media"),
             ]
 
             return path in system_dirs

@@ -1,6 +1,7 @@
 import atexit
 import logging
 import os
+import platform
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -32,6 +33,31 @@ class ModManager:
         if path:
             ModManager._game_path_cache = path
         return path
+
+    @staticmethod
+    def get_player_config_path() -> Optional[Path]:
+        """
+        Returns the path to config_player.xml based on the OS.
+        On Windows, it's typically in the game directory.
+        On Linux/macOS, it's in the user data directory.
+        """
+        game_path = ModManager.get_game_path()
+        
+        system = platform.system()
+        if system == "Windows":
+             return game_path / "config_player.xml" if game_path else None
+        
+        elif system == "Linux" or system == "Darwin":
+             if system == "Linux":
+                 base = Path.home() / ".local" / "share"
+             else:
+                 base = Path.home() / "Library" / "Application Support"
+             
+             config_path = base / "Daedalic Entertainment GmbH" / "Barotrauma" / "config_player.xml"
+             return config_path
+        
+        # Fallback
+        return game_path / "config_player.xml" if game_path else None
 
     @staticmethod
     def init():
@@ -157,7 +183,7 @@ class ModManager:
 
         file_path = p_dir / f"{preset_name}.xml"
         
-        root = XMLElement("mods")
+        root = XMLElement("mods", {"name": preset_name})
         
         root.add_child(XMLElement("Vanilla"))
         
@@ -165,12 +191,20 @@ class ModManager:
             if mod.local:
                 root.add_child(XMLElement("Local", {"name": mod.name}))
             else:
-        
                 w_id = mod.steam_id if mod.steam_id else mod.id
                 root.add_child(XMLElement("Workshop", {"name": mod.name, "id": w_id}))
         
         try:
+
             XMLBuilder.save(root, file_path)
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write('<?xml version="1.0" encoding="utf-8"?>\n')
+                f.write(content)
+                
             return True
         except Exception as e:
             logger.error(f"Failed to save preset {preset_name}: {e}")
@@ -186,8 +220,12 @@ class ModManager:
         ModManager.inactive_mods.clear()
         ModManager._mod_map.clear()
 
-        config_player = game_path / "config_player.xml"
-        active_mod_configs = ModManager._get_active_mod_configs(config_player)
+        ModManager._mod_map.clear()
+
+        config_player = ModManager.get_player_config_path()
+        active_mod_configs = {}
+        if config_player:
+            active_mod_configs = ModManager._get_active_mod_configs(config_player)
 
         paths_to_check = [
             game_path / "LocalMods",
@@ -458,16 +496,23 @@ class ModManager:
             logger.error(f"Game path does not exist!\n|Path: {game_path}")
             return
 
-        user_config_path = game_path / "config_player.xml"
-        if not user_config_path.exists():
-            logger.error(f"config_player.xml does not exist!\n|Path: {user_config_path}")
+        user_config_path = ModManager.get_player_config_path()
+        
+        # FIX: Removed the strict .exists() check that was causing the error.
+        if not user_config_path:
+            logger.error(f"Could not determine path for config_player.xml")
             return
 
         try:
-            xml_obj = XMLBuilder.load(user_config_path)
+            # FIX: Try to load existing, otherwise create new root
+            xml_obj = None
+            if user_config_path.exists():
+                xml_obj = XMLBuilder.load(user_config_path)
+            
+            # If load failed or file didn't exist, create a fresh root element
             if not xml_obj:
-                logger.error(f"Invalid config_player.xml\n|Path: {user_config_path}")
-                return
+                logger.info("config_player.xml not found or empty, creating new.")
+                xml_obj = XMLElement("config")
 
             regularpackages_list = list(xml_obj.find_only_elements("regularpackages"))
             
@@ -489,20 +534,38 @@ class ModManager:
                         if hasattr(PartsManager, 'do_changes'):
                             PartsManager.do_changes(mod, active_ids_set)
 
-                mod_path = mod.str_path 
+                # Normalize paths
+                raw_path = str(mod.str_path)
+                normalized_path = raw_path.replace("\\", "/")
+                
+                if normalized_path.endswith("/"):
+                    full_path = f"{normalized_path}filelist.xml"
+                else:
+                    full_path = f"{normalized_path}/filelist.xml"
+
                 reg_pkg_node.add_child(XMLComment(mod.name))
                 reg_pkg_node.add_child(
-                    XMLElement("package", {"path": f"{mod_path}/filelist.xml"})
+                    XMLElement("package", {"path": full_path})
                 )
+
+            # FIX: Ensure parent directory exists before saving
+            if not user_config_path.parent.exists():
+                try:
+                    user_config_path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    logger.error(f"Failed to create directory for config: {e}")
+                    return
 
             temp_path = user_config_path.with_suffix('.tmp')
             XMLBuilder.save(xml_obj, temp_path)
             if temp_path.exists():
                 temp_path.replace(user_config_path)
             
+            logger.info(f"Mods saved successfully to {user_config_path}")
+
         except Exception as e:
             logger.error(f"Error saving mods: {e}", exc_info=True)
-
+    
     @staticmethod
     def _on_exit():
         try:
@@ -513,34 +576,49 @@ class ModManager:
             if not game_path:
                 return
 
-            user_config_path = game_path / "config_player.xml"
-            if not user_config_path.exists():
+            user_config_path = ModManager.get_player_config_path()
+            # FIX: Only return if path is None, don't return just because file is missing yet
+            if not user_config_path:
                 return
 
-            xml_obj = XMLBuilder.load(user_config_path)
-            if not xml_obj: return
+            # Load or Create
+            xml_obj = None
+            if user_config_path.exists():
+                xml_obj = XMLBuilder.load(user_config_path)
+            
+            if not xml_obj:
+                xml_obj = XMLElement("config")
 
+            # Find or Create regularpackages
             pkgs = list(xml_obj.find_only_elements("regularpackages"))
-            if not pkgs: return
-            reg_pkg = pkgs[0]
+            if pkgs:
+                reg_pkg = pkgs[0]
+            else:
+                reg_pkg = XMLElement("regularpackages")
+                xml_obj.add_child(reg_pkg)
             
             reg_pkg.childrens.clear()
 
             for mod in ModManager.active_mods:
                 try:
-                    mod_path = mod.str_path
+                    raw_path = str(mod.str_path)
+                    normalized_path = raw_path.replace("\\", "/")
+                    if normalized_path.endswith("/"):
+                        full_path = f"{normalized_path}filelist.xml"
+                    else:
+                        full_path = f"{normalized_path}/filelist.xml"
+
                     reg_pkg.add_child(XMLComment(mod.name))
                     reg_pkg.add_child(
-                        XMLElement("package", {"path": f"{mod_path}/filelist.xml"})
+                        XMLElement("package", {"path": full_path})
                     )
-
-                    if mod.has_toggle_content:
-                        try:
-                            PartsManager.rollback_changes_no_thread(mod)
-                        except Exception as e:
-                            logger.error(f"Error rolling back changes for mod {mod.name}: {e}")
+                            
                 except Exception as e:
                     logger.error(f"Error processing mod {mod.name} on exit: {e}")
+
+            # Ensure dir exists
+            if not user_config_path.parent.exists():
+                user_config_path.parent.mkdir(parents=True, exist_ok=True)
 
             tmp = user_config_path.with_suffix('.tmp')
             XMLBuilder.save(xml_obj, tmp)
@@ -549,7 +627,6 @@ class ModManager:
 
         except Exception as e:
             logger.error(f"Error during exit processing: {e}")
-
     @staticmethod
     def process_errors():
         active_ids = {mod.id for mod in ModManager.active_mods}
