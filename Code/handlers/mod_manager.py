@@ -22,8 +22,8 @@ class DependencyPriority:
     USER_RULE = 1000
     REQUIREMENT = 500
     PATCH = 400
+    IMPLICIT_PATCH = 350
     OVERRIDE = 300
-    IMPLICIT_PATCH = 200
     NAME_MATCH = 100
 
 
@@ -239,13 +239,18 @@ class ModManager:
         xml = XMLBuilder.load(path)
         if not xml:
             return {}
+
+        steam_path = AppConfig.get_steam_mod_path()
+        steam_path_str = str(steam_path).replace("\\", "/").lower() if steam_path else ""
+
         configs = {}
         pkgs = list(xml.find_only_elements("package"))
         for i, pkg in enumerate(pkgs, 1):
             p_attr = pkg.attributes.get("path")
             if p_attr:
-                # Store normalized path (minus /filelist.xml) as key
                 norm = p_attr.replace("\\", "/").lower()
+                if steam_path_str:
+                    norm = norm.replace("%moddir%", steam_path_str)
                 if norm.endswith("/filelist.xml"):
                     norm = norm[:-13]
                 configs[norm] = i
@@ -369,13 +374,20 @@ class ModManager:
         pkgs_node.childrens.clear()
 
         active_ids = {m.id for m in ModManager.active_mods}
+        steam_path = AppConfig.get_steam_mod_path()
 
         # Saving in UI order: Top mod is FIRST in XML
         for mod in ModManager.active_mods:
             if mod.has_toggle_content:
                 PartsManager.do_changes(mod, active_ids)
 
-            p = str(mod.str_path).replace("\\", "/")
+            if mod.local:
+                p = f"LocalMods/{mod.path.parts[-1]}"
+            elif steam_path and mod.path.is_relative_to(steam_path):
+                p = f"%ModDir%/{mod.path.name}"
+            else:
+                p = str(mod.path).replace("\\", "/")
+
             if not p.endswith("/"):
                 p += "/"
             full_p = p + "filelist.xml"
@@ -412,6 +424,14 @@ class ModManager:
 
             for dep in mod.metadata.dependencies:
                 if dep.type == "conflict" and dep.id in active_ids:
+                    conflict_mod = ModManager._mod_map.get(dep.id)
+                    if conflict_mod:
+                        mod_name_lower = mod.name.lower()
+                        conflict_name_lower = conflict_mod.name.lower()
+                        patch_keywords = ("patch", "compat")
+                        if (any(k in mod_name_lower for k in patch_keywords) and
+                                conflict_name_lower in mod_name_lower):
+                            continue
                     msg = dep.attributes.get("message", "conflict")
                     mod.metadata.errors.append(msg)
                 elif dep.type != "requiredAnyOrder" and dep.id not in active_ids:
@@ -433,6 +453,15 @@ class ModManager:
                         key_id=oid
                     )
                     mod.metadata.warnings.append(warn)
+
+    @staticmethod
+    def _patch_matches_target(patch_name_lower: str, target_name_lower: str) -> bool:
+        if target_name_lower in patch_name_lower:
+            return True
+        words = [w for w in target_name_lower.split() if len(w) > 3]
+        if not words:
+            return False
+        return all(w in patch_name_lower for w in words)
 
     @staticmethod
     def sort():
@@ -460,12 +489,23 @@ class ModManager:
                         if w > adj[mid].get(dep.id, (0, ""))[0]:
                             adj[mid][dep.id] = (w, f"Meta-{dep.type}")
 
+            # C: улучшенное name-matching (слова, не только подстрока)
             if any(k in mname for k in ('patch', 'compat')):
                 for o in mods:
-                    if o.id != mid and o.name.lower() in mname:
+                    if o.id != mid and ModManager._patch_matches_target(mname, o.name.lower()):
                         priority = DependencyPriority.IMPLICIT_PATCH
                         if priority > adj[mid].get(o.id, (0, ""))[0]:
                             adj[mid][o.id] = (priority, "Implicit-Patch")
+
+                # A: override-based — если патч и цель переопределяют одни ID
+                if mod.override_id:
+                    for o in mods:
+                        if o.id != mid and o.override_id:
+                            shared = mod.override_id & o.override_id
+                            if shared and ModManager._patch_matches_target(mname, o.name.lower()):
+                                priority = DependencyPriority.PATCH
+                                if priority > adj[mid].get(o.id, (0, ""))[0]:
+                                    adj[mid][o.id] = (priority, "Override-Patch")
 
         for rule in UserRulesManager.get_rules():
             s, t = rule["subject"], rule["target"]

@@ -90,6 +90,11 @@ class UserRulesManager:
         return False
 
     @classmethod
+    def clear_all(cls) -> None:
+        cls._rules.clear()
+        cls.save()
+
+    @classmethod
     def _check_path_exists(cls, start_node: str, end_node: str) -> bool:
         # Build graph from current rules
         # Edge: Target -> Subject (Subject depends on Target)

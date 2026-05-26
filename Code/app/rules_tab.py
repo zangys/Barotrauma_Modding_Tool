@@ -13,9 +13,11 @@ class RulesTab:
     TAG_RULES_TABLE = "rules_table"
     TAG_STATUS = "rules_status"
     TAG_SEARCH_RULES = "rules_table_search"
+    TAG_RULES_COUNT = "rules_count_text"
 
     _full_mod_list: List[str] = []
     _mod_id_name_map = {}
+    _all_mod_ids = set()
     _current_rules_filter: str = ""
 
     @staticmethod
@@ -25,58 +27,63 @@ class RulesTab:
             parent="main_tab_bar",
             tag=RulesTab.TAG_TAB
         ):
-            # --- Add Rule Section ---
-            with dpg.group(horizontal=False):
-                dpg.add_text(
-                    loc.get_string("header-add-rule"),
-                    color=UIColors.HEADER
-                )
+            dpg.add_text(
+                loc.get_string("header-add-rule"),
+                color=UIColors.HEADER
+            )
 
-                with dpg.group(horizontal=True):
-                    with dpg.group():
-                        dpg.add_text(loc.get_string("label-mod-subject"))
-                        dpg.add_input_text(
-                            hint=loc.get_string("combo-search"),
-                            width=300,
-                            callback=RulesTab.on_combo_search_changed,
-                            user_data=RulesTab.TAG_COMBO_A
-                        )
-                        dpg.add_combo([], tag=RulesTab.TAG_COMBO_A, width=300)
+            with dpg.group(horizontal=True):
+                with dpg.group():
+                    dpg.add_text(loc.get_string("label-mod-subject"), color=UIColors.SUCCESS)
+                    dpg.add_input_text(
+                        hint=loc.get_string("combo-search"),
+                        width=300,
+                        callback=RulesTab.on_combo_search_changed,
+                        user_data=RulesTab.TAG_COMBO_A
+                    )
+                    dpg.add_combo([], tag=RulesTab.TAG_COMBO_A, width=300)
 
-                    dpg.add_text("-->", color=UIColors.VALUE)
+                with dpg.group():
+                    dpg.add_spacer(height=18)
+                    arrow_text = dpg.add_text("  ▲\n  |\n  ▼", color=UIColors.VALUE)
+                    with dpg.tooltip(arrow_text):
+                        dpg.add_text(loc.get_string("tooltip-rule-direction"), wrap=300)
 
-                    with dpg.group():
-                        dpg.add_text(loc.get_string("label-mod-target"))
-                        dpg.add_input_text(
-                            hint=loc.get_string("combo-search"),
-                            width=300,
-                            callback=RulesTab.on_combo_search_changed,
-                            user_data=RulesTab.TAG_COMBO_B
-                        )
-                        dpg.add_combo([], tag=RulesTab.TAG_COMBO_B, width=300)
+                with dpg.group():
+                    dpg.add_text(loc.get_string("label-mod-target"), color=UIColors.ERROR)
+                    dpg.add_input_text(
+                        hint=loc.get_string("combo-search"),
+                        width=300,
+                        callback=RulesTab.on_combo_search_changed,
+                        user_data=RulesTab.TAG_COMBO_B
+                    )
+                    dpg.add_combo([], tag=RulesTab.TAG_COMBO_B, width=300)
 
-                    with dpg.group():
-                        dpg.add_spacer(height=18)
-                        with dpg.group(horizontal=True):
-                            dpg.add_button(
-                                label=loc.get_string("btn-add-rule"),
-                                callback=RulesTab.add_rule
-                            )
-                            dpg.add_button(
-                                label=loc.get_string("btn-generate-rules"),
-                                callback=RulesTab.generate_rules
-                            )
+                with dpg.group():
+                    dpg.add_spacer(height=18)
+                    dpg.add_button(
+                        label=loc.get_string("btn-add-rule"),
+                        callback=RulesTab.add_rule
+                    )
+                    dpg.add_button(
+                        label=loc.get_string("btn-generate-rules"),
+                        callback=RulesTab.generate_rules
+                    )
+                    dpg.add_button(
+                        label=loc.get_string("btn-clear-rules"),
+                        callback=RulesTab.clear_all_rules
+                    )
 
-                dpg.add_text("", tag=RulesTab.TAG_STATUS, color=UIColors.ERROR)
-
+            dpg.add_text("", tag=RulesTab.TAG_STATUS, color=UIColors.ERROR)
             dpg.add_separator()
 
-            # --- List Rules Section ---
             with dpg.group(horizontal=True):
                 dpg.add_text(
                     loc.get_string("header-current-rules"),
                     color=UIColors.HEADER
                 )
+                dpg.add_spacer(width=10)
+                dpg.add_text("", tag=RulesTab.TAG_RULES_COUNT, color=UIColors.LABEL)
                 dpg.add_spacer(width=20)
                 dpg.add_input_text(
                     hint=loc.get_string("rule-search"),
@@ -97,10 +104,9 @@ class RulesTab:
                 dpg.add_table_column(
                     label=loc.get_string("column-actions"),
                     width_fixed=True,
-                    init_width_or_weight=100
+                    init_width_or_weight=120
                 )
 
-            # Initial Refresh
             RulesTab.refresh_data()
 
     @staticmethod
@@ -110,6 +116,7 @@ class RulesTab:
 
         RulesTab._full_mod_list = [f"{m.name} ({m.id})" for m in all_mods]
         RulesTab._mod_id_name_map = {m.id: m.name for m in all_mods}
+        RulesTab._all_mod_ids = {m.id for m in all_mods}
 
         dpg.configure_item(RulesTab.TAG_COMBO_A, items=RulesTab._full_mod_list)
         dpg.configure_item(RulesTab.TAG_COMBO_B, items=RulesTab._full_mod_list)
@@ -140,6 +147,7 @@ class RulesTab:
 
         rules = UserRulesManager.get_rules()
         search_term = RulesTab._current_rules_filter
+        displayed = 0
 
         for idx, rule in enumerate(rules):
             subject_id = rule["subject"]
@@ -147,18 +155,43 @@ class RulesTab:
 
             s_name = RulesTab._mod_id_name_map.get(subject_id, subject_id)
             t_name = RulesTab._mod_id_name_map.get(target_id, target_id)
-            rule_text = f"{s_name}  -->  {t_name}"
 
+            s_missing = subject_id not in RulesTab._all_mod_ids
+            t_missing = target_id not in RulesTab._all_mod_ids
+
+            rule_text = f"{s_name}  ▲  {t_name}"
             if search_term and search_term not in rule_text.lower():
                 continue
 
+            displayed += 1
             with dpg.table_row(parent=RulesTab.TAG_RULES_TABLE):
-                dpg.add_text(rule_text)
+                with dpg.group(horizontal=True):
+                    dpg.add_text(
+                        s_name,
+                        color=UIColors.WARNING if s_missing else UIColors.SUCCESS
+                    )
+                    if s_missing:
+                        dpg.add_text(loc.get_string("label-rule-missing"), color=UIColors.ERROR)
+                    dpg.add_text("  ▲  ", color=UIColors.VALUE)
+                    dpg.add_text(
+                        t_name,
+                        color=UIColors.WARNING if t_missing else UIColors.DEFAULT
+                    )
+                    if t_missing:
+                        dpg.add_text(loc.get_string("label-rule-missing"), color=UIColors.ERROR)
+
                 dpg.add_button(
                     label=loc.get_string("btn-remove-rule"),
                     user_data=idx,
                     callback=lambda s, a, u: RulesTab.remove_rule(u)
                 )
+
+        total = len(rules)
+        if dpg.does_item_exist(RulesTab.TAG_RULES_COUNT):
+            dpg.set_value(
+                RulesTab.TAG_RULES_COUNT,
+                loc.get_string("label-rules-count", count=total)
+            )
 
     @staticmethod
     def add_rule():
@@ -166,10 +199,8 @@ class RulesTab:
         val_b = dpg.get_value(RulesTab.TAG_COMBO_B)
 
         if not val_a or not val_b:
-            err_msg = loc.get_string(
-                "error-adding-rule", error="Select both mods"
-            )
-            dpg.set_value(RulesTab.TAG_STATUS, err_msg)
+            dpg.set_value(RulesTab.TAG_STATUS, loc.get_string("error-adding-rule", error="Select both mods"))
+            dpg.configure_item(RulesTab.TAG_STATUS, color=UIColors.ERROR)
             return
 
         def extract_id(val):
@@ -183,75 +214,63 @@ class RulesTab:
         success, msg = UserRulesManager.add_rule(id_a, id_b)
 
         if success:
-            dpg.set_value(
-                RulesTab.TAG_STATUS,
-                loc.get_string("msg-rule-added", subject=id_a, target=id_b)
-            )
+            dpg.set_value(RulesTab.TAG_STATUS, loc.get_string("msg-rule-added", subject=id_a, target=id_b))
             dpg.configure_item(RulesTab.TAG_STATUS, color=UIColors.SUCCESS)
             RulesTab.refresh_table()
         else:
-            dpg.set_value(
-                RulesTab.TAG_STATUS,
-                loc.get_string("error-adding-rule", error=msg)
-            )
+            dpg.set_value(RulesTab.TAG_STATUS, loc.get_string("error-adding-rule", error=msg))
             dpg.configure_item(RulesTab.TAG_STATUS, color=UIColors.ERROR)
 
     @staticmethod
     def generate_rules():
-        import re
         active_mods = ModManager.active_mods
-        active_names_map = {m.name.lower(): m for m in active_mods}
-        count = 0
+        mod_id_map = {m.id: m for m in active_mods}
+        added = 0
+        skipped = 0
 
-        keywords = [
-            'patch', 'compatibility', 'compat', 'патч', 'совместимость'
-        ]
-        separators = r'[&+\-/|,]'
+        patch_keywords = ('patch', 'compat', 'compatibility', 'патч', 'совместимость')
 
         for mod in active_mods:
             mname_lower = mod.name.lower()
-            if any(k in mname_lower for k in keywords):
-                parts = re.split(separators, mname_lower)
-                for p in parts:
-                    p_clean = p.strip()
-                    for k in keywords:
-                        p_clean = p_clean.replace(k, "").strip()
 
-                    if len(p_clean) < 3:
+            # Name-based: patch/compat mod → find targets by name similarity
+            if any(k in mname_lower for k in patch_keywords):
+                for other in active_mods:
+                    if other.id == mod.id:
                         continue
+                    if ModManager._patch_matches_target(mname_lower, other.name.lower()):
+                        ok, _ = UserRulesManager.add_rule(mod.id, other.id)
+                        if ok:
+                            added += 1
+                        else:
+                            skipped += 1
 
-                    target_mod = active_names_map.get(p_clean)
-                    if not target_mod:
-                        for name, amod in active_names_map.items():
-                            if (name == p_clean or
-                                    (len(name) > 5 and name in p_clean) or
-                                    (len(p_clean) > 5 and p_clean in name)):
-                                if amod.id != mod.id:
-                                    target_mod = amod
-                                    break
-
-                    if target_mod and target_mod.id != mod.id:
-                        # Subject = Patch (mod), Target = Main mod (target_mod)
-                        # This ensures Patch is HIGHER than Main mod.
-                        success, _ = UserRulesManager.add_rule(
-                            mod.id, target_mod.id
-                        )
-                        if success:
-                            count += 1
+            # Metadata-based: declared patch dependencies
+            for dep in mod.metadata.dependencies:
+                if dep.type == "patch" and dep.id in mod_id_map:
+                    ok, _ = UserRulesManager.add_rule(mod.id, dep.id)
+                    if ok:
+                        added += 1
+                    else:
+                        skipped += 1
 
         RulesTab.refresh_data()
         dpg.set_value(
             RulesTab.TAG_STATUS,
-            loc.get_string("msg-rules-generated", count=count)
+            loc.get_string("msg-rules-generated", added=added, skipped=skipped)
         )
         dpg.configure_item(RulesTab.TAG_STATUS, color=UIColors.SUCCESS)
 
     @staticmethod
+    def clear_all_rules():
+        UserRulesManager.clear_all()
+        RulesTab.refresh_table()
+        dpg.set_value(RulesTab.TAG_STATUS, loc.get_string("msg-rules-cleared"))
+        dpg.configure_item(RulesTab.TAG_STATUS, color=UIColors.DEFAULT)
+
+    @staticmethod
     def remove_rule(index):
         if UserRulesManager.remove_rule(index):
-            dpg.set_value(
-                RulesTab.TAG_STATUS,
-                loc.get_string("confirm-delete-rule")
-            )
+            dpg.set_value(RulesTab.TAG_STATUS, loc.get_string("confirm-delete-rule"))
             dpg.configure_item(RulesTab.TAG_STATUS, color=UIColors.DEFAULT)
             RulesTab.refresh_table()

@@ -56,6 +56,17 @@ class ConflictsTab:
         ConflictsTab.scan_conflicts()
 
     @staticmethod
+    def _is_intentional_patch(mods: List[ModUnit]) -> bool:
+        patch_keywords = ("patch", "compat")
+        names_lower = [m.name.lower() for m in mods]
+        for i, name in enumerate(names_lower):
+            if any(k in name for k in patch_keywords):
+                for j, other in enumerate(names_lower):
+                    if i != j and other in name:
+                        return True
+        return False
+
+    @staticmethod
     def scan_conflicts():
         # Clear existing rows
         if dpg.does_item_exist(ConflictsTab.TAG_TABLE):
@@ -88,11 +99,15 @@ class ConflictsTab:
 
             mods_involved = override_map[oid]
             count = len(mods_involved)
-            
+
             if count > 1:
-                status_text = loc.get_string("status-conflict")
-                status_color = UIColors.ERROR
-                conflict_count += 1
+                if ConflictsTab._is_intentional_patch(mods_involved):
+                    status_text = loc.get_string("status-override")
+                    status_color = UIColors.VALUE
+                else:
+                    status_text = loc.get_string("status-conflict")
+                    status_color = UIColors.ERROR
+                    conflict_count += 1
             else:
                 status_text = loc.get_string("status-override")
                 status_color = UIColors.VALUE
