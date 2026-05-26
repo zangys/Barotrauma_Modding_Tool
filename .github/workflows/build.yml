@@ -57,13 +57,23 @@ jobs:
           pip install pyinstaller
           pip install -r requirements.txt
 
-      - name: Get version from app_vars.py
+      - name: Get version
         id: version
         shell: bash
         run: |
-          VERSION=$(grep -oP 'version.*=.*"\K[^"]+' Code/app_vars.py || echo "unknown")
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION=$(git describe --tags --always || echo "dev")
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
+
+      - name: Create version file
+        shell: bash
+        run: |
+          mkdir -p Data
+          echo "${{ steps.version.outputs.version }}" > Data/version.txt
 
       - name: Build with PyInstaller (Windows)
         if: matrix.os == 'windows-latest'

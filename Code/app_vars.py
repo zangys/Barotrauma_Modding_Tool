@@ -2,13 +2,14 @@ import atexit
 import json
 import logging
 import platform
+import subprocess
 from pathlib import Path
-from typing import Any, Dict, Final, Optional
+from typing import Any, Dict, Optional
 
 
 class AppConfig:
     user_config: Dict[str, Any] = {}
-    version: Final[str] = "v1.0.9"
+    version: str = "dev"
 
     _root: Path = Path(__file__).parents[1]
     _data_root: Path = _root / "Data"
@@ -31,7 +32,9 @@ class AppConfig:
             )
 
         elif platform.system() == "Linux":
-            cls._user_data_path = Path.home() / ".config" / "BarotraumaModdingTool"
+            cls._user_data_path = (
+                Path.home() / ".config" / "BarotraumaModdingTool"
+            )
 
         elif platform.system() == "Darwin":
             cls._user_data_path = (
@@ -45,9 +48,39 @@ class AppConfig:
             raise RuntimeError("Unknown operating system")
 
         cls._user_data_path.mkdir(parents=True, exist_ok=True)
+        cls._init_version()
         cls._load_user_config()
         cls.set("debug", debug)
         atexit.register(cls._save_user_config)
+
+    @classmethod
+    def _init_version(cls) -> None:
+        """Initializes the application version."""
+        # 1. Try to read from Data/version.txt (set during build)
+        version_file = cls._data_root / "version.txt"
+        if version_file.exists():
+            try:
+                cls.version = version_file.read_text(encoding="utf-8").strip()
+                return
+            except Exception:
+                pass
+
+        # 2. Try to get from Git
+        try:
+            result = subprocess.run(
+                ["git", "describe", "--tags", "--always"],
+                cwd=cls._root,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            cls.version = result.stdout.strip()
+            return
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+
+        # 3. Default
+        cls.version = "dev"
 
     @classmethod
     def _load_user_config(cls) -> None:
@@ -64,10 +97,13 @@ class AppConfig:
     @classmethod
     def _save_user_config(cls) -> None:
         config_path = cls._user_data_path / "config.json"
-        cls.user_config.pop("debug")
+        cls.user_config.pop("debug", None)
 
-        with open(config_path, "w", encoding="utf-8") as file:
-            json.dump(cls.user_config, file, indent=4, sort_keys=True)
+        try:
+            with open(config_path, "w", encoding="utf-8") as file:
+                json.dump(cls.user_config, file, indent=4, sort_keys=True)
+        except Exception as err:
+            logging.error(f"Failed to save user config: {err}")
 
     @classmethod
     def get(cls, key: str, default=None) -> Optional[Any]:

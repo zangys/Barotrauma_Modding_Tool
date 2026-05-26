@@ -1,5 +1,17 @@
 input-hint-search = Найти модификацию...
 label-active-mods = Активные модификации
+label-dependencies = Зависимости:
+msg-enter-preset-name = Сначала введите название пресета!
+msg-preset-invalid-chars = Недопустимые символы в названии!
+msg-preset-load-failed = Не удалось загрузить пресет!
+msg-preset-loaded = Пресет успешно загружен.
+msg-preset-loaded-missing = Загружено с отсутствующими модами: {count}
+msg-preset-save-failed = Ошибка сохранения пресета.
+msg-preset-saved = Пресет '{name}' сохранён!
+msg-select-preset-first = Сначала выберите пресет!
+status-done = Готово!
+status-error = Ошибка!
+status-loading = Загрузка...
 label-author = Автор:
 label-directory-found = Путь установки игры:
 label-enable-cs-scripting = Включён CS Scripting?

@@ -1,5 +1,6 @@
 import gc
 import logging
+import queue
 import threading
 import dearpygui.dearpygui as dpg
 
@@ -7,10 +8,19 @@ from Code.handlers import ModManager
 
 
 class App:
+    ui_tasks_queue: queue.Queue = queue.Queue()
+
     @staticmethod
     def run() -> None:
         try:
-            dpg.start_dearpygui()
+            while dpg.is_dearpygui_running():
+                while not App.ui_tasks_queue.empty():
+                    try:
+                        task = App.ui_tasks_queue.get_nowait()
+                        task()
+                    except Exception as e:
+                        logging.error(f"Error in UI task: {e}")
+                dpg.render_dearpygui_frame()
 
         except Exception as e:
             logging.error(f"Error during running GUI: {e}")

@@ -26,13 +26,17 @@ class AppInitializer:
 
     @staticmethod
     def _init_viewport():
-        size = AppConfig.get("last_viewport_size", "600 400")
-        width, height = size.split(" ")  # type: ignore
+        try:
+            size = AppConfig.get("last_viewport_size", "600 400")
+            width, height = size.split(" ")
+            width, height = int(width), int(height)
+        except Exception:
+            width, height = 600, 400
         dpg.create_viewport(
             title=loc.get_string("viewport-name"),
-            width=int(width),
+            width=width,
             min_width=600,
-            height=int(height),
+            height=height,
             min_height=400,
         )
         dpg.show_viewport()

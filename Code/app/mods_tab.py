@@ -30,6 +30,9 @@ class ModsTab:
     TAG_ERROR_TEXT = "error_count_text"
     TAG_WARNING_TEXT = "warning_count_text"
     TAG_RELOAD_STATUS = "reload_status_text"
+    TAG_DIRECTORY_STATUS = "directory_status_text"
+    TAG_CS_STATUS = "cs_scripting_status"
+    TAG_LUA_STATUS = "lua_status"
     TAG_BTN_RELOAD = "reload_mods_button"
     TAG_PRESET_COMBO = "preset_combo"
     TAG_PRESET_INPUT = "preset_new_name_input"
@@ -44,33 +47,30 @@ class ModsTab:
             dpg.add_separator()
 
             with dpg.group(horizontal=True):
-                dpg.add_text(loc.get_string("label-presets", default="Mod Presets:"))
-                
-                # Выпадающий список
+                dpg.add_text(loc.get_string("label-presets"))
+
                 presets = ModManager.get_available_presets()
                 dpg.add_combo(
-                    items=presets, 
-                    tag=ModsTab.TAG_PRESET_COMBO, 
+                    items=presets,
+                    tag=ModsTab.TAG_PRESET_COMBO,
                     width=200,
                     callback=ModsTab.on_preset_selected
                 )
-                
-                # Кнопка Загрузить
+
                 dpg.add_button(
-                    label=loc.get_string("btn-load-preset", default="Load"), 
+                    label=loc.get_string("btn-load-preset"),
                     callback=ModsTab.on_load_preset_clicked
                 )
 
                 dpg.add_spacer(width=20)
 
-                # Сохранение нового
                 dpg.add_input_text(
-                    hint=loc.get_string("hint-new-preset-name", default="New Preset Name"), 
-                    tag=ModsTab.TAG_PRESET_INPUT, 
+                    hint=loc.get_string("hint-new-preset-name"),
+                    tag=ModsTab.TAG_PRESET_INPUT,
                     width=150
                 )
                 dpg.add_button(
-                    label=loc.get_string("btn-save-preset", default="Save"), 
+                    label=loc.get_string("btn-save-preset"),
                     callback=ModsTab.on_save_preset_clicked
                 )
                 
@@ -162,6 +162,7 @@ class ModsTab:
             dpg.add_text(loc.get_string("label-directory-found"), color=UIColors.LABEL)
             dpg.add_text(
                 str(AppConfig.get("barotrauma_dir", loc.get_string("base-not-set"))),
+                tag=ModsTab.TAG_DIRECTORY_STATUS,
                 color=UIColors.VALUE,
             )
 
@@ -170,6 +171,7 @@ class ModsTab:
             dpg.add_text(loc.get_string("label-enable-cs-scripting"), color=UIColors.LABEL)
             dpg.add_text(
                 loc.get_string("base-yes") if has_cs else loc.get_string("base-no"),
+                tag=ModsTab.TAG_CS_STATUS,
                 color=UIColors.SUCCESS if has_cs else UIColors.ERROR,
             )
 
@@ -178,6 +180,7 @@ class ModsTab:
             dpg.add_text(loc.get_string("label-lua-installed"), color=UIColors.LABEL)
             dpg.add_text(
                 loc.get_string("base-yes") if has_lua else loc.get_string("base-no"),
+                tag=ModsTab.TAG_LUA_STATUS,
                 color=UIColors.SUCCESS if has_lua else UIColors.ERROR,
             )
 
@@ -189,9 +192,9 @@ class ModsTab:
 
     @staticmethod
     def on_reload_mods_clicked():
-        dpg.set_value(ModsTab.TAG_RELOAD_STATUS, "Загрузка...")
+        dpg.set_value(ModsTab.TAG_RELOAD_STATUS, loc.get_string("status-loading"))
         dpg.configure_item(ModsTab.TAG_BTN_RELOAD, enabled=False)
-        
+
         threading.Thread(target=ModsTab._thread_reload_mods, daemon=True).start()
 
     @staticmethod
@@ -202,13 +205,6 @@ class ModsTab:
         except Exception as e:
             logger.error(f"Error reloading mods: {e}", exc_info=True)
             ModsTab._dispatch_ui_update(ModsTab._finalize_reload, success=False)
-
-    @staticmethod
-    def _finalize_reload(success: bool):
-        ModsTab.render_mods()
-        status_text = "Готово!" if success else "Ошибка!"
-        dpg.set_value(ModsTab.TAG_RELOAD_STATUS, status_text)
-        dpg.configure_item(ModsTab.TAG_BTN_RELOAD, enabled=True)
 
     @staticmethod
     def on_activate_all_clicked():
@@ -361,7 +357,7 @@ class ModsTab:
                 dpg.add_separator()
 
             if mod.metadata.dependencies:
-                dpg.add_text("Dependencies:", color=UIColors.LABEL)
+                dpg.add_text(loc.get_string("label-dependencies"), color=UIColors.LABEL)
                 for dep in mod.metadata.dependencies:
                     dpg.add_text(f"• {dep.type}: {dep.id} (Optional: {dep.condition is not None})")
 
@@ -484,49 +480,49 @@ class ModsTab:
     def on_load_preset_clicked():
         preset_name = dpg.get_value(ModsTab.TAG_PRESET_COMBO)
         if not preset_name:
-            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Select a preset first!")
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-select-preset-first"))
             return
 
         success, missing = ModManager.load_preset(preset_name)
-        
+
         if success:
             ModsTab.render_mods()
             if missing:
-                dpg.set_value(ModsTab.TAG_PRESET_MSG, f"Loaded with missing mods: {len(missing)}")
+                dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-preset-loaded-missing", count=len(missing)))
                 logger.warning(f"Missing mods in preset '{preset_name}': {missing}")
             else:
-                dpg.set_value(ModsTab.TAG_PRESET_MSG, "Preset loaded successfully.")
+                dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-preset-loaded"))
         else:
-            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Failed to load preset!")
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-preset-load-failed"))
 
     @staticmethod
     def on_save_preset_clicked():
         name = dpg.get_value(ModsTab.TAG_PRESET_INPUT).strip()
         if not name:
-            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Enter a name first!")
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-enter-preset-name"))
             return
-        
+
         invalid_chars = '<>:"/\\|?*'
         if any(char in invalid_chars for char in name):
-            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Invalid characters in name!")
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-preset-invalid-chars"))
             return
 
         if ModManager.save_preset(name):
-            dpg.set_value(ModsTab.TAG_PRESET_MSG, f"Saved '{name}'!")
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-preset-saved", name=name))
             presets = ModManager.get_available_presets()
             dpg.configure_item(ModsTab.TAG_PRESET_COMBO, items=presets)
             dpg.set_value(ModsTab.TAG_PRESET_COMBO, name)
             dpg.set_value(ModsTab.TAG_PRESET_INPUT, "")
         else:
-            dpg.set_value(ModsTab.TAG_PRESET_MSG, "Error saving preset.")
+            dpg.set_value(ModsTab.TAG_PRESET_MSG, loc.get_string("msg-preset-save-failed"))
 
     @staticmethod
     def _finalize_reload(success: bool):
         ModsTab.render_mods()
-        status_text = "Готово!" if success else "Ошибка!"
+        status_text = loc.get_string("status-done") if success else loc.get_string("status-error")
         dpg.set_value(ModsTab.TAG_RELOAD_STATUS, status_text)
         dpg.configure_item(ModsTab.TAG_BTN_RELOAD, enabled=True)
-        
+
         if success:
             presets = ModManager.get_available_presets()
             dpg.configure_item(ModsTab.TAG_PRESET_COMBO, items=presets)

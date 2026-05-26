@@ -1,3 +1,159 @@
 {
-    "rules": []
+    "rules": [
+        {
+            "action": "load_before",
+            "subject": "3096526115",
+            "target": "3089776991"
+        },
+        {
+            "action": "load_before",
+            "subject": "3092782715",
+            "target": "3089776991"
+        },
+        {
+            "action": "load_before",
+            "subject": "3092781798",
+            "target": "3089776991"
+        },
+        {
+            "action": "load_before",
+            "subject": "3153498101",
+            "target": "3114087512"
+        },
+        {
+            "action": "load_before",
+            "subject": "3153498101",
+            "target": "3319935686"
+        },
+        {
+            "action": "load_before",
+            "subject": "3089781423",
+            "target": "3089776991"
+        },
+        {
+            "action": "load_before",
+            "subject": "3089781423",
+            "target": "2764968387"
+        },
+        {
+            "action": "load_before",
+            "subject": "3539184400",
+            "target": "3534702008"
+        },
+        {
+            "action": "load_before",
+            "subject": "3165372921",
+            "target": "3114087512"
+        },
+        {
+            "action": "load_before",
+            "subject": "3165372921",
+            "target": "3227815460"
+        },
+        {
+            "action": "load_before",
+            "subject": "3590977394",
+            "target": "3574385658"
+        },
+        {
+            "action": "load_before",
+            "subject": "3337851889",
+            "target": "3239164008"
+        },
+        {
+            "action": "load_before",
+            "subject": "3072525010",
+            "target": "3190189044"
+        },
+        {
+            "action": "load_before",
+            "subject": "3013046953",
+            "target": "2764968387"
+        },
+        {
+            "action": "load_before",
+            "subject": "3013046953",
+            "target": "3190189044"
+        },
+        {
+            "action": "load_before",
+            "subject": "3089785060",
+            "target": "3089776991"
+        },
+        {
+            "action": "load_before",
+            "subject": "3089785060",
+            "target": "3028141718"
+        },
+        {
+            "action": "load_before",
+            "subject": "3222593240",
+            "target": "2954998725"
+        },
+        {
+            "action": "load_before",
+            "subject": "3222593240",
+            "target": "3190189044"
+        },
+        {
+            "action": "load_before",
+            "subject": "3262062723",
+            "target": "3217556378"
+        },
+        {
+            "action": "load_before",
+            "subject": "3449453992",
+            "target": "3279470465"
+        },
+        {
+            "action": "load_before",
+            "subject": "3282179907",
+            "target": "3114087512"
+        },
+        {
+            "action": "load_before",
+            "subject": "3262061824",
+            "target": "3279470465"
+        },
+        {
+            "action": "load_before",
+            "subject": "3233224136",
+            "target": "2532991202"
+        },
+        {
+            "action": "load_before",
+            "subject": "3036805935",
+            "target": "2764968387"
+        },
+        {
+            "action": "load_before",
+            "subject": "2911529819",
+            "target": "2532991202"
+        },
+        {
+            "action": "load_before",
+            "subject": "2911529819",
+            "target": "2020332046"
+        },
+        {
+            "action": "load_before",
+            "subject": "2984452754",
+            "target": "2532991202"
+        },
+        {
+            "action": "load_before",
+            "subject": "3179049556",
+            "target": "3172965454"
+        },
+        {
+            "action": "load_before",
+            "subject": "3448276676",
+            "target": "3279470465"
+        },
+        {
+            "action": "load_before",
+            "subject": "3448276676",
+            "target": "3449453992"
+        }
+    ]
 }

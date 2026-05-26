@@ -109,7 +109,6 @@ class SettingsTab:
                         callback=lambda s, a: AppConfig.set("experimental", a),
                     )
             dpg.add_separator()
-            dpg.add_separator()
 
             dpg.add_text(
                 loc.get_string("settings-app-visual"),
@@ -131,7 +130,7 @@ class SettingsTab:
             )
             
             # --- Theme Selector ---
-            dpg.add_text("Theme:", color=UIColors.VALUE)
+            dpg.add_text(loc.get_string("label-theme"), color=UIColors.VALUE)
             dpg.add_combo(
                 items=ThemeManager.get_themes(),
                 default_value=AppConfig.get("app_theme", "Dark"),
@@ -191,26 +190,22 @@ class SettingsTab:
 
             has_cs = AppConfig.get("has_cs")
             has_lua = AppConfig.get("has_lua")
+            cs_text = loc.get_string("base-yes") if has_cs else loc.get_string("base-no")
+            lua_text = loc.get_string("base-yes") if has_lua else loc.get_string("base-no")
 
-            dpg.set_value(
-                "cs_scripting_status",
-                loc.get_string("base-yes") if has_cs else loc.get_string("base-no"),
-            )
-            dpg.configure_item(
-                "cs_scripting_status",
-                color=UIColors.SUCCESS if has_cs else UIColors.ERROR,
-            )
+            if dpg.does_item_exist(ModsTab.TAG_CS_STATUS):
+                dpg.set_value(ModsTab.TAG_CS_STATUS, cs_text)
+                dpg.configure_item(ModsTab.TAG_CS_STATUS, color=UIColors.SUCCESS if has_cs else UIColors.ERROR)
 
-            dpg.set_value(
-                "lua_status",
-                loc.get_string("base-yes") if has_lua else loc.get_string("base-no"),
-            )
-            dpg.configure_item(
-                "lua_status", color=UIColors.SUCCESS if has_lua else UIColors.ERROR
-            )
+            if dpg.does_item_exist(ModsTab.TAG_LUA_STATUS):
+                dpg.set_value(ModsTab.TAG_LUA_STATUS, lua_text)
+                dpg.configure_item(ModsTab.TAG_LUA_STATUS, color=UIColors.SUCCESS if has_lua else UIColors.ERROR)
 
-            dpg.set_value("barotrauma_cur_path_text", path)
-            dpg.set_value("directory_status_text", path)
+            if dpg.does_item_exist("barotrauma_cur_path_text"):
+                dpg.set_value("barotrauma_cur_path_text", path)
+
+            if dpg.does_item_exist(ModsTab.TAG_DIRECTORY_STATUS):
+                dpg.set_value(ModsTab.TAG_DIRECTORY_STATUS, str(path))
 
             logging.debug(f"Path set for display: {path}")
 
@@ -250,44 +245,52 @@ class SettingsTab:
 
     @classmethod
     def _run_search(cls):
-        dpg.delete_item("find_game_window", children_only=True)
-        dpg.add_text(
-            loc.get_string("search-exp-game"),
-            parent="find_game_window",
-            wrap=400,
-            color=(150, 150, 150),
-        )
-        dpg.add_loading_indicator(style=2, parent="find_game_window")
+        from Code.app.app import App
+
+        def _show_searching():
+            dpg.delete_item("find_game_window", children_only=True)
+            dpg.add_text(
+                loc.get_string("search-exp-game"),
+                parent="find_game_window",
+                wrap=400,
+                color=(150, 150, 150),
+            )
+            dpg.add_loading_indicator(style=2, parent="find_game_window")
+
+        App.ui_tasks_queue.put(_show_searching)
 
         results = Game.search_all_games_on_all_drives()
-        dpg.delete_item("find_game_window", children_only=True)
 
-        if results:
-            dpg.add_text(
-                loc.get_string("search-exp-game-done"),
-                parent="find_game_window",
-                wrap=0,
-            )
-            dpg.add_separator(parent="find_game_window")
-            for path in results:
-                dpg.add_button(
-                    label=str(path),
+        def _show_results():
+            dpg.delete_item("find_game_window", children_only=True)
+            if results:
+                dpg.add_text(
+                    loc.get_string("search-exp-game-done"),
                     parent="find_game_window",
-                    user_data=path,
-                    callback=cls._select_and_close,
+                    wrap=0,
                 )
-        else:
-            dpg.add_text(
-                loc.get_string("search-exp-game-none"),
-                parent="find_game_window",
-                wrap=0,
-            )
-            dpg.add_separator(parent="find_game_window")
-            dpg.add_button(
-                label=loc.get_string("base-close"),
-                callback=lambda s, a: dpg.delete_item("find_game_window"),
-                parent="find_game_window",
-            )
+                dpg.add_separator(parent="find_game_window")
+                for path in results:
+                    dpg.add_button(
+                        label=str(path),
+                        parent="find_game_window",
+                        user_data=path,
+                        callback=cls._select_and_close,
+                    )
+            else:
+                dpg.add_text(
+                    loc.get_string("search-exp-game-none"),
+                    parent="find_game_window",
+                    wrap=0,
+                )
+                dpg.add_separator(parent="find_game_window")
+                dpg.add_button(
+                    label=loc.get_string("base-close"),
+                    callback=lambda s, a: dpg.delete_item("find_game_window"),
+                    parent="find_game_window",
+                )
+
+        App.ui_tasks_queue.put(_show_results)
 
     @classmethod
     def _select_and_close(cls, sender, app_data, user_data):

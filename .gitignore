@@ -23,3 +23,4 @@ dist/*
 build/*
 main.spec
 Data/mod_cache.pkl
+Data/user_rules.json

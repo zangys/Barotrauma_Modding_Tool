@@ -7,13 +7,14 @@
 import logging
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
 import threading
 import zipfile
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Tuple
 
 import dearpygui.dearpygui as dpg
 import requests
@@ -26,6 +27,12 @@ logger = logging.getLogger(__name__)
 # GitHub API URL
 GITHUB_REPO = "zangys/Barotrauma_Modding_Tool_Enchanted"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+
+def _parse_version(tag: str) -> Tuple[int, ...]:
+    """Extract numeric version tuple from a tag like 'v1.2.3' or '1.2.3-4-gabcdef'."""
+    numbers = re.findall(r"\d+", tag)
+    return tuple(int(n) for n in numbers) if numbers else (0,)
 
 
 class AutoUpdater:
@@ -57,7 +64,7 @@ class AutoUpdater:
                 latest_tag = release_data.get("tag_name", "")
                 current_version = AppConfig.version
 
-                if latest_tag and latest_tag != current_version:
+                if latest_tag and _parse_version(latest_tag) > _parse_version(current_version):
                     cls._update_info = {
                         "tag_name": latest_tag,
                         "name": release_data.get("name", latest_tag),

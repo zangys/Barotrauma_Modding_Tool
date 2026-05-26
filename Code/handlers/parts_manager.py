@@ -1,9 +1,9 @@
 import logging
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional, Set, Pattern
+from typing import List, Set, Pattern
 
 from Code.app_vars import AppConfig
 from Code.package import ModUnit
@@ -55,10 +55,16 @@ class PartsManager:
         max_workers = min(32, (os.cpu_count() or 4) * 4)
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(cls._process_single_xml, f, active_mod_ids, is_rollback)
+            futures = {
+                executor.submit(
+                    cls._process_single_xml, f, active_mod_ids, is_rollback
+                ): f
                 for f in files
-            ]
+            }
+            for fut in as_completed(futures):
+                exc = fut.exception()
+                if exc:
+                    logger.error(f"Error processing {futures[fut]}: {exc}")
 
     @classmethod
     def _process_single_xml(cls, file_path: Path, active_mod_ids: Set[str], is_rollback: bool):
@@ -167,19 +173,19 @@ class PartsManager:
                 if not item_tag or not item_file_attr:
                     continue
 
-                if (item_tag.lower() == target_tag.lower() and 
-                    Path(item_file_attr).as_posix() == Path(rel_path_raw).as_posix()):
+                if (item_tag.lower() == target_tag.lower() and
+                        Path(item_file_attr).as_posix() == Path(rel_path_raw).as_posix()):
                     if should_be_active and is_comment:
-                        xml_filelist.replace(item.index, new_node)
+                        # check_item is already the element (converted above via to_element)
+                        xml_filelist.replace(item.index, check_item)
                         filelist_modified = True
                         cls._rename_file_on_disk(rel_path_raw, to_active=True)
-
                     elif not should_be_active and not is_comment:
                         new_node = item.to_comment()
                         xml_filelist.replace(item.index, new_node)
                         filelist_modified = True
                         cls._rename_file_on_disk(rel_path_raw, to_active=False)
-                    break 
+                    break
 
         if filelist_modified:
             XMLBuilder.save(xml_filelist, filelist_path)
@@ -187,8 +193,13 @@ class PartsManager:
     @staticmethod
     def _rename_file_on_disk(raw_path: str, to_active: bool):
         try:
-            resolved_path_str = raw_path.replace("%ModDir%", str(AppConfig.get_steam_mod_path())) \
-                                        .replace("LocalMods", str(AppConfig.get_local_mod_path()))
+            steam_path = AppConfig.get_steam_mod_path()
+            local_path = AppConfig.get_local_mod_path()
+            resolved_path_str = raw_path
+            if steam_path is not None:
+                resolved_path_str = resolved_path_str.replace("%ModDir%", str(steam_path))
+            if local_path is not None:
+                resolved_path_str = resolved_path_str.replace("LocalMods", str(local_path))
             
             target_path = Path(resolved_path_str)
             

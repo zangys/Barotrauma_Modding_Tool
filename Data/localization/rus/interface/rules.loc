@@ -12,3 +12,6 @@ confirm-delete-rule = Правило удалено.
 column-rule = Правило
 column-actions = Действия
 combo-search = Поиск мода...
+rule-search = Поиск правила...
+btn-generate-rules = Генерировать Правила
+msg-rules-generated = Создано {count} правил на основе названий модов.

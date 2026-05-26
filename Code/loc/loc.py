@@ -69,7 +69,7 @@ class Localization:
                     current_key, value = line.split("=", 1)
                     cls._translations[current_key.strip()] = value.strip()
 
-                elif line.startswith(".") and current_key:
+                elif line.startswith(".") and current_key and "=" in line:
                     sub_key, sub_value = line.split("=", 1)
                     cls._translations[sub_key.strip()] = sub_value.strip()
 

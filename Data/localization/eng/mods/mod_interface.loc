@@ -1,5 +1,17 @@
 input-hint-search = Find Mod...
 label-active-mods = Active Mods
+label-dependencies = Dependencies:
+msg-enter-preset-name = Enter a preset name first!
+msg-preset-invalid-chars = Invalid characters in name!
+msg-preset-load-failed = Failed to load preset!
+msg-preset-loaded = Preset loaded successfully.
+msg-preset-loaded-missing = Loaded with missing mods: {count}
+msg-preset-save-failed = Error saving preset.
+msg-preset-saved = Saved '{name}'!
+msg-select-preset-first = Select a preset first!
+status-done = Done!
+status-error = Error!
+status-loading = Loading...
 label-author = Author:
 label-directory-found = Game Installation Path:
 label-enable-cs-scripting = Is CS Scripting Enabled?

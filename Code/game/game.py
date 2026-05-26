@@ -141,6 +141,7 @@ class Game:
         except Exception as e:
             logger.error(f"Error running the game: {e}")
     
+    @staticmethod
     def search_all_games_on_all_drives() -> List[Path]:
         game_name = "barotrauma"
 

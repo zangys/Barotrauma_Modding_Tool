@@ -1,5 +1,17 @@
 base-conflict = Konflikt gefunden
 input-hint-search = Finde Mod...
+label-dependencies = Abhängigkeiten:
+msg-enter-preset-name = Bitte zuerst einen Namen eingeben!
+msg-preset-invalid-chars = Ungültige Zeichen im Namen!
+msg-preset-load-failed = Preset konnte nicht geladen werden!
+msg-preset-loaded = Preset erfolgreich geladen.
+msg-preset-loaded-missing = Geladen mit fehlenden Mods: {count}
+msg-preset-save-failed = Fehler beim Speichern des Presets.
+msg-preset-saved = Preset '{name}' gespeichert!
+msg-select-preset-first = Bitte zuerst ein Preset auswählen!
+status-done = Fertig!
+status-error = Fehler!
+status-loading = Laden...
 label-active-mods = Aktive Mods
 label-author = Autor:
 label-directory-found = Installationsverzeichnis:
